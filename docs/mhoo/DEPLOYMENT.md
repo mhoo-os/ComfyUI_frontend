@@ -17,7 +17,7 @@ pnpm deploy:higgsfield:assets
 pnpm deploy:higgsfield:api
 ```
 
-`build:higgsfield` keeps the normal upstream build and changes only the starter workflow under `VITE_HIGGSFIELD=true`. Pages hosts `dist/`; its production branch is `main` for direct asset deployment. The Worker config is `cloudflare/wrangler.jsonc`. The route uses existing `/00/*` Access protection, verifies the JWT audience/issuer and owner email, and rejects cross-origin mutations. No provider keys belong in Vite variables or frontend code.
+`build:higgsfield` keeps the normal upstream build and enables the starter workflow, native upload/estimate controls and provider status under `VITE_HIGGSFIELD=true`. Pages hosts `dist/`; its production branch is `main` for direct asset deployment. The Worker config is `cloudflare/wrangler.jsonc`. The route uses existing `/00/*` Access protection, verifies the JWT audience/issuer and owner email, and rejects cross-origin mutations. No provider keys belong in Vite variables or frontend code.
 
 Regenerate binding declarations after configuration changes:
 
@@ -35,8 +35,16 @@ The runtime tests use isolated Miniflare storage and a simulated provider with t
 
 ## Rollback
 
-List the Worker deployment versions with `pnpm exec wrangler versions list --config cloudflare/wrangler.jsonc`, inspect the intended version, and use Wrangler rollback for a confirmed prior deployment. Pages retains separate deployments; redeploy a known-good matching `dist/` build. Do not delete the Durable Object namespace or KV namespace during rollback: they contain workflows and paid job state.
+List the Worker deployment versions with `pnpm exec wrangler versions list --config cloudflare/wrangler.jsonc`, inspect the intended version, and use Wrangler rollback for a confirmed prior deployment. Pages retains separate deployments; redeploy a known-good matching `dist/` build. Do not delete the Durable Object namespace, KV namespace or R2 bucket during rollback: they contain workflows and paid job state.
 
 ## Limitations
 
 See [CAPABILITY-GAPS.md](CAPABILITY-GAPS.md). This is an owner-only iterative release, not a full ComfyUI execution server. The initial local build passed on Node 24.16.0 with the upstream Node 26 engine warning; use the declared engine in CI/future reproducible environments. Lint passes with upstream warnings.
+
+## Media and reference workflows
+
+`COMFY_MEDIA` binds the private `mhoo-comfy-media` R2 bucket. There is no public bucket domain. New output media is archived before advancing to the next model; byte ranges are served through authenticated `/view`. Keep provider URLs for downstream inference and recovery. Paid result URLs are saved before archival and never resubmitted because storage failed. Old outputs are not automatically backfilled.
+
+Native image upload buttons send a bounded image body to `/api/higgsfield/upload`. The Worker obtains the presigned URL with its secret, then sends only the returned upload headers to storage. Credentials and presigned upload URLs are never sent to the client. Upload input retention follows the provider; important original files should be retained separately.
+
+Import `docs/mhoo/workflows/coffee-campaign.json` for the three-node reference→keyframe→end-frame→video demonstration. Run is billable; use native per-node estimates first. Account discounts and token-metered video prices can change.

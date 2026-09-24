@@ -59,3 +59,7 @@ if (isCloud || isNightly) {
 if (isNightly && !isCloud) {
   await import('./nightlyBadges')
 }
+
+if (import.meta.env.VITE_HIGGSFIELD === 'true') {
+  await import('./higgsfield')
+}

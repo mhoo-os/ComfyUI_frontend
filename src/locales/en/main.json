@@ -5393,5 +5393,18 @@
       "subscribe": "Subscribe",
       "upgradePlan": "Upgrade plan"
     }
+  },
+  "higgsfield": {
+    "upload": "Upload {input}",
+    "tooLarge": "Images must be no larger than 20 MB.",
+    "uploadFailed": "Image upload failed. Please try again.",
+    "uploaded": "Reference image uploaded",
+    "estimate": "Estimate Higgsfield cost",
+    "estimateFailed": "Could not estimate this node.",
+    "estimateLinked": "Set a public image URL to estimate this node before running linked inputs.",
+    "ready": "Higgsfield · Ready · Run uses provider credits",
+    "running": "Higgsfield · {status} · Step {step}/{total}",
+    "statusUnavailable": "Higgsfield · Status unavailable; reconnecting",
+    "estimatedPrice": "Estimated ${usd} USD · {credits} credits. Actual charges may vary."
   }
 }

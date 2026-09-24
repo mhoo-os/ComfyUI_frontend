@@ -3,6 +3,7 @@ import { z } from 'zod'
 
 import { models, nodeDefinitions } from './graph'
 import { boundedJson, json } from './jobs'
+import { uploadImage } from './media'
 import { userData } from './userData'
 
 export { ComfyJobs } from './jobs'
@@ -45,6 +46,8 @@ export default {
         return json({ error: 'Same-origin request required.' }, 403)
       const relative = url.pathname.slice(base.length)
       const path = relative.replace(/^\/api(?=\/|$)/, '')
+      if (path === '/higgsfield/upload' && request.method === 'POST')
+        return uploadImage(request, env)
       if (path === '/object_info') return json(nodeDefinitions())
       if (path === '/features') return json({})
       if (path === '/users') return json({ storage: 'server', migrated: true })

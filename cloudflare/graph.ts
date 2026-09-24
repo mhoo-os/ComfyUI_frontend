@@ -8,7 +8,10 @@ const propertySchema = z.object({
   default: z.union([z.string(), z.number(), z.boolean()]).optional(),
   minimum: z.number().optional(),
   maximum: z.number().optional(),
-  format: z.string().optional()
+  format: z.string().optional(),
+  maxLength: z.number().optional(),
+  providerField: z.string().optional(),
+  asArray: z.boolean().optional()
 })
 const modelSchema = z.object({
   title: z.string(),
@@ -35,8 +38,12 @@ const graphSchema = z.record(
   })
 )
 export type Graph = z.infer<typeof graphSchema>
-export type Input = Record<string, string | number | boolean>
-export type Media = { url: string; kind: 'image' | 'video' }
+export type Input = Record<string, string | number | boolean | string[]>
+export type Media = {
+  url: string
+  kind: 'image' | 'video'
+  storageKey?: string
+}
 
 export function nodeDefinitions() {
   return Object.fromEntries(
@@ -111,11 +118,11 @@ export function planGraph(value: unknown): { graph: Graph; order: string[] } {
       if (Array.isArray(value)) {
         if (value[1] !== 0)
           throw new Error('Only the URL output (slot 0) can be connected.')
-        if (!['prompt', 'image_url'].includes(key))
+        if (!['prompt', 'image_url', 'end_image_url'].includes(key))
           throw new Error('Connect URLs only to text or image URL inputs.')
         visit(value[0])
         if (
-          key === 'image_url' &&
+          key.endsWith('image_url') &&
           models[graph[value[0]].class_type].kind !== 'image'
         )
           throw new Error('Image input requires an image output.')
@@ -171,7 +178,7 @@ export function resolveInputs(
       throw new Error(`${key} is outside the supported range.`)
     if (prop.enum && !prop.enum.includes(value as string | number))
       throw new Error(`Unsupported ${key}.`)
-    if (typeof value === 'string' && value.length > 8000)
+    if (typeof value === 'string' && value.length > (prop.maxLength ?? 8000))
       throw new Error(`${key} is too long.`)
     if (
       prop.format === 'uuid' &&
@@ -190,7 +197,7 @@ export function resolveInputs(
       )
         throw new Error('Media inputs must use public HTTPS URLs.')
     }
-    input[key] = value
+    input[prop.providerField ?? key] = prop.asArray ? [String(value)] : value
   }
   return input
 }

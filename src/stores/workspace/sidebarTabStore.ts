@@ -138,7 +138,8 @@ export const useSidebarTabStore = defineStore('sidebarTab', () => {
 
     registerSidebarTab(useAssetsSidebarTab())
     registerSidebarTab(useNodeLibrarySidebarTab())
-    registerSidebarTab(useModelLibrarySidebarTab())
+    if (import.meta.env.VITE_HIGGSFIELD !== 'true')
+      registerSidebarTab(useModelLibrarySidebarTab())
     registerSidebarTab(useWorkflowsSidebarTab())
     registerSidebarTab(useAppsSidebarTab())
 

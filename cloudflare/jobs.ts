@@ -3,6 +3,7 @@ import { z } from 'zod'
 
 import { models, planGraph, resolveInputs } from './graph'
 import type { Graph, Media } from './graph'
+import { archiveMedia, readMedia } from './media'
 import { provider, resultMedia, resultSchema } from './provider'
 
 const submissionSchema = z.object({
@@ -24,6 +25,7 @@ type Job = {
   index: number
   outputs: Record<string, Media[]>
   requestId?: string
+  providerRequests?: Record<string, string>
   submitting?: boolean
   cancelRequested?: boolean
   error?: string
@@ -104,8 +106,11 @@ function jobDetail(job: Job) {
   return {
     id: job.id,
     provider_request_id: job.requestId,
+    provider_requests: job.providerRequests ?? {},
     last_poll_error: job.lastPollError,
     provider_status: job.providerStatus,
+    current_step: Math.min(job.index + 1, job.order.length),
+    total_steps: job.order.length,
     update_time: job.updated,
     status: job.status,
     create_time: job.created,
@@ -311,7 +316,9 @@ export class ComfyJobs extends DurableObject<Env> {
             media.map((item, i) => ({
               id: `${id}/${node}/${i}`,
               name: `${models[job.graph[node].class_type].title} ${i + 1}`,
-              preview_url: item.url,
+              preview_url: item.storageKey
+                ? `/00/comfy/api/view?filename=${id}/${node}/${i}`
+                : item.url,
               mime_type: item.kind === 'image' ? 'image/jpeg' : 'video/mp4',
               node_id: node,
               output_key: item.kind === 'image' ? 'images' : 'video',
@@ -327,7 +334,9 @@ export class ComfyJobs extends DurableObject<Env> {
         const job = await this.ctx.storage.get<Job>(`job:${id}`)
         const media = job?.outputs[node]?.[parseInt(index, 10)]
         if (!media) return json({ error: 'Media not found' }, 404)
-        return Response.redirect(media.url, 302)
+        return media.storageKey
+          ? readMedia(this.env, media.storageKey, request)
+          : Response.redirect(media.url, 302)
       }
       if (
         path === '/interrupt' ||
@@ -447,6 +456,10 @@ export class ComfyJobs extends DurableObject<Env> {
           )
         )
         job.requestId = result.request_id
+        job.providerRequests = {
+          ...job.providerRequests,
+          [nodeId]: result.request_id
+        }
         job.submitting = false
         await this.save(job)
       }
@@ -455,8 +468,6 @@ export class ComfyJobs extends DurableObject<Env> {
       )
       job.providerStatus = result.status
       await this.save(job)
-      job.pollErrors = 0
-      job.lastPollError = undefined
       if (['failed', 'nsfw', 'canceled'].includes(result.status)) {
         await this.finish(
           job,
@@ -472,7 +483,16 @@ export class ComfyJobs extends DurableObject<Env> {
             'Higgsfield completed without supported media outputs.'
           )
         job.outputs[nodeId] = media
+        await this.save(job)
+        job.outputs[nodeId] = await Promise.all(
+          media.map((item, index) =>
+            archiveMedia(this.env, item, `outputs/${job.id}/${nodeId}/${index}`)
+          )
+        )
         job.requestId = undefined
+        job.providerStatus = undefined
+        job.pollErrors = 0
+        job.lastPollError = undefined
         this.broadcast('executed', {
           node: nodeId,
           display_node: nodeId,
@@ -486,6 +506,9 @@ export class ComfyJobs extends DurableObject<Env> {
           return
         }
       }
+      job.pollErrors = 0
+      job.lastPollError = undefined
+      await this.save(job)
       await this.ctx.storage.setAlarm(Date.now() + 5000)
     } catch (error) {
       job.pollErrors = (job.pollErrors ?? 0) + 1

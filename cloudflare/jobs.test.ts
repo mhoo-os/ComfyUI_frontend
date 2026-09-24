@@ -1,4 +1,5 @@
 import { build } from 'esbuild'
+import type { Request as MiniflareRequest } from 'miniflare'
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare'
 import { beforeAll, describe, expect, it, onTestFinished } from 'vitest'
 
@@ -19,7 +20,10 @@ const requestId = '2bf4de45-6926-4b44-bd5a-62d6e72537b1'
 const graph = {
   '1': { class_type: 'HiggsfieldSoul', inputs: { prompt: 'A mountain lake' } }
 }
-async function runtime(handler: (request: Request) => Promise<Response>) {
+async function runtime(
+  handler: (request: MiniflareRequest) => Promise<Response>,
+  mediaHandler?: (request: MiniflareRequest) => Promise<Response>
+) {
   const mf = new Miniflare(
     convertV4MiniflareOptions({
       modules: true,
@@ -27,10 +31,18 @@ async function runtime(handler: (request: Request) => Promise<Response>) {
       compatibilityDate: '2026-09-24',
       compatibilityFlags: ['nodejs_compat'],
       kvNamespaces: ['COMFY_STATE'],
+      r2Buckets: ['COMFY_MEDIA'],
       durableObjects: {
         COMFY_JOBS: { className: 'TestJobs', useSQLite: true }
       },
-      outboundService: handler
+      outboundService: async (request) =>
+        new URL(request.url).hostname === 'cdn.example.com'
+          ? mediaHandler
+            ? mediaHandler(request)
+            : new Response('image-bytes', {
+                headers: { 'content-type': 'image/png', 'content-length': '11' }
+              })
+          : handler(request)
     })
   )
   onTestFinished(() => mf.dispose())
@@ -70,11 +82,23 @@ describe('Durable workflow lifecycle', () => {
         video: null
       })
     })
-    await queue(mf)
+    const job = await queue(mf)
     await tick(mf)
     expect(await jobs(mf)).toMatchObject({ jobs: [{ status: 'in_progress' }] })
     await tick(mf)
     expect(submissions).toBe(1)
+    const archived = await mf.dispatchFetch(
+      `https://test/view?filename=${job.prompt_id}/1/0.png`
+    )
+    expect(archived.status).toBe(200)
+    expect(await archived.text()).toBe('image-bytes')
+    const range = await mf.dispatchFetch(
+      `https://test/view?filename=${job.prompt_id}/1/0.png`,
+      { headers: { Range: 'bytes=0-4' } }
+    )
+    expect(range.status).toBe(206)
+    expect(range.headers.get('content-range')).toBe('bytes 0-4/11')
+    expect(await range.text()).toBe('image')
     expect(await jobs(mf)).toMatchObject({
       jobs: [
         {
@@ -165,5 +189,134 @@ describe('Durable workflow lifecycle', () => {
       204
     )
     expect((await mf.dispatchFetch(file)).status).toBe(404)
+  })
+})
+
+describe('Reference pipeline and storage', () => {
+  it('uploads with provider headers without forwarding credentials to storage', async () => {
+    const mf = await runtime(async (request) => {
+      if (request.url.endsWith('/files/generate-upload-url')) {
+        expect(request.headers.get('authorization')).toBe('Key test-only')
+        expect(await request.json()).toEqual({ content_type: 'image/png' })
+        return Response.json({
+          public_url: 'https://uploads.example.com/reference.png',
+          upload_url: 'https://uploads.example.com/put',
+          content_type: 'image/png',
+          upload_headers: {
+            'Content-Type': 'image/png',
+            'x-amz-tagging': 'retention=temporary'
+          }
+        })
+      }
+      expect(request.method).toBe('PUT')
+      expect(request.headers.get('authorization')).toBeNull()
+      expect(request.headers.get('x-amz-tagging')).toBe('retention=temporary')
+      expect(await request.text()).toBe('reference-bytes')
+      return new Response(null, { status: 200 })
+    })
+    const response = await mf.dispatchFetch('https://test/higgsfield/upload', {
+      method: 'POST',
+      headers: { 'content-type': 'image/png' },
+      body: 'reference-bytes'
+    })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      url: 'https://uploads.example.com/reference.png'
+    })
+  })
+
+  it('stops repeated archival failures while retaining the paid output URL', async () => {
+    let submissions = 0
+    const mf = await runtime(
+      async (request) => {
+        if (request.method === 'POST') submissions++
+        return Response.json({
+          request_id: requestId,
+          status: 'completed',
+          images: [{ url: 'https://cdn.example.com/image.png' }]
+        })
+      },
+      async () => new Response(null, { status: 503 })
+    )
+    await queue(mf)
+    for (let i = 0; i < 13; i++) await tick(mf)
+    expect(submissions).toBe(1)
+    expect(await jobs(mf)).toMatchObject({
+      jobs: [
+        {
+          status: 'failed',
+          outputs_count: 1,
+          outputs: { '1': { text: ['https://cdn.example.com/image.png'] } }
+        }
+      ]
+    })
+  })
+
+  it('chains a reference edit into video, archives both outputs, and never resubmits during an archive retry', async () => {
+    const submitted: unknown[] = []
+    let mediaReads = 0
+    const mf = await runtime(
+      async (request) => {
+        if (request.method === 'POST') {
+          submitted.push(await request.json())
+          return Response.json({ request_id: requestId, status: 'queued' })
+        }
+        return Response.json({
+          request_id: requestId,
+          status: 'completed',
+          ...(submitted.length === 1
+            ? { images: [{ url: 'https://cdn.example.com/keyframe.png' }] }
+            : { video: { url: 'https://cdn.example.com/video.mp4' } })
+        })
+      },
+      async (request) => {
+        mediaReads++
+        if (mediaReads === 1) return new Response(null, { status: 503 })
+        const video = request.url.endsWith('.mp4')
+        return new Response('media-bytes', {
+          headers: {
+            'content-type': video ? 'video/mp4' : 'image/png',
+            'content-length': '11'
+          }
+        })
+      }
+    )
+    const job = await queue(mf, {
+      '1': {
+        class_type: 'HiggsfieldCampaign',
+        inputs: {
+          prompt: 'Restage coffee',
+          image_url: 'https://uploads.example.com/reference.png'
+        }
+      },
+      '2': {
+        class_type: 'HiggsfieldAnimate',
+        inputs: { image_url: ['1', 0], duration: 4 }
+      }
+    })
+    await tick(mf)
+    await tick(mf)
+    await tick(mf)
+    expect(submitted).toHaveLength(2)
+    expect(submitted[0]).toMatchObject({
+      image_urls: ['https://uploads.example.com/reference.png']
+    })
+    expect(submitted[1]).toMatchObject({
+      image_url: 'https://cdn.example.com/keyframe.png'
+    })
+    expect(await jobs(mf)).toMatchObject({
+      jobs: [
+        {
+          status: 'completed',
+          outputs_count: 2,
+          provider_requests: { '1': requestId, '2': requestId }
+        }
+      ]
+    })
+    const video = await mf.dispatchFetch(
+      `https://test/view?filename=${job.prompt_id}/2/0.mp4`
+    )
+    expect(video.headers.get('content-type')).toBe('video/mp4')
+    expect(await video.text()).toBe('media-bytes')
   })
 })
