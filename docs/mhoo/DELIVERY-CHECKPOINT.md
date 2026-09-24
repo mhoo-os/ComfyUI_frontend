@@ -158,3 +158,13 @@ Release and live visual verification in progress; not yet claimed delivered.
 Delivery Room read/evaluator succeeds but old revision-1 metadata still lacks
 steps/evidence/Linear association. Update remains pending after prior
 DELIVERY_ROOM_REQUEST_UNCONFIRMED; checkpoint is current evidence.
+
+Live verification completed: Worker e2b5fc89-09b5-4d32-b99a-9d1a736f6439,
+Pages https://32b15223.mhoo-comfy.pages.dev. Opened native Marketing Studio node,
+confirmed Character references button and dialog. Uploaded one user-confirmed
+original privately, saved known subject/era with unknown capture year preserved,
+and refreshed successfully. Preview renders, draft status persists and Use in
+node is disabled. No provider upload or paid generation was initiated. Personal
+asset identity and source details remain in private storage, not this repo.
+Library is open for user review. Remaining collection import, cropping, Soul
+training and generated-keyframe approval are not claimed complete.

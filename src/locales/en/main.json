@@ -5420,7 +5420,7 @@
     "refresh": "Refresh",
     "approve": "Approve selected",
     "revoke": "Return selected to draft",
-    "count": "{count} photos",
+    "count": "No photos | {count} photo | {count} photos",
     "loading": "Loading…",
     "uploading": "Uploading privately…",
     "saving": "Saving…",
