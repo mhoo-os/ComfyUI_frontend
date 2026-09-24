@@ -218,3 +218,13 @@ Eight focused tests cover selection, review constraints, grouping and crop bound
 First deployed verification: https://68422662.mhoo-comfy.pages.dev. Final refinement
 and release verification pending. Room metadata remains stale under previously
 recorded update failure; pending reconciliation, no duplicate job/issue created.
+
+Final release verified: https://9daade9a.mhoo-comfy.pages.dev, source 8bdf2af.
+Production /00/comfy/?release=face-groups: one group per row, paired original/current
+crop, numbered detected faces, selected crop preview and top-of-view instructions.
+Live confirmed sofa position produced 111x296 native crop; no save or approval
+was performed. Detection missed one of four faces, so manual fallback remains
+necessary for some photos. Nine targeted tests, full build/typechecks, full lint
+(existing warnings), knip and commit hooks pass. Vendor runtime files are excluded
+from source formatting/linting and explicitly declared runtime entries for knip.
+No backend, provider, training or approval-state changes in this release.
