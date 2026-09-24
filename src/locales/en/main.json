@@ -5452,12 +5452,12 @@
       "profile": "Profile",
       "other": "Other"
     },
-    "needsReview": "Needs crop review",
+    "needsReview": "Needs review",
     "needsSelection": "Needs face selection",
     "currentCrop": "Current crop",
-    "cropFirst": "Choose your face to create a crop. Your original is kept here.",
+    "cropFirst": "Use the original as-is when it already shows the intended subject clearly. Cropping and masking are optional.",
     "history": "Older crops ({count})",
-    "approvedCrops": "Only groups with an approved current crop"
+    "approvedCrops": "Approved references only"
   },
   "referenceCrop": {
     "open": "Crop",

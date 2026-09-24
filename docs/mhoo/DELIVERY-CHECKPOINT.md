@@ -261,3 +261,13 @@ provider calls, training, restoration or paid generation. Real mask removed adja
 faces but retained some sofa/overlapping arm and imperfect edges. This is an optional
 review aid, not a clean-dataset guarantee or automatic approval. No claim of blur,
 yaw or occlusion measurements; checks are dimensions and detected-box geometry.
+
+2026-09-25 original-as-is correction: approved-original-only groups remain in the
+approved filter; original cards explicitly say cropping/masking is optional.
+Seven ReferenceLibrary tests, changed-file lint and full build/typecheck pass.
+Pages https://03cd3b72.mhoo-comfy.pages.dev deployed; live library verifies new
+copy. Worker unchanged. Automatic batch quality screening remains unimplemented.
+Jev Social supports Instagram discovery but its explicit media download action is
+TikTok-only; it is not yet our Instagram photo import bridge.
+Tagged Instagram collection started through the permitted in-app session; source
+photos and provenance stay in the private local reference archive, outside Git.

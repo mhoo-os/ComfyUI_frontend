@@ -36,7 +36,7 @@ const groups = computed(() => groupReferences(assets.value))
 const visibleGroups = computed(() =>
   groups.value.filter(
     (group) =>
-      !approvedOnly.value || (group.current && approvedReference(group.current))
+      !approvedOnly.value || approvedReference(group.current ?? group.original)
   )
 )
 const editing = ref<ReferenceAsset | null>(null)
@@ -326,13 +326,11 @@ onMounted(() => {
           class="flex flex-col gap-3 rounded-lg border p-4"
         >
           <h3 class="m-0 font-semibold break-all">{{ group.original.name }}</h3>
-          <strong>{{
+          <strong v-if="group.current">{{
             t(
-              group.current
-                ? approvedReference(group.current)
-                  ? 'referenceLibrary.approved'
-                  : 'referenceLibrary.needsReview'
-                : 'referenceLibrary.needsSelection'
+              approvedReference(group.current ?? group.original)
+                ? 'referenceLibrary.approved'
+                : 'referenceLibrary.needsReview'
             )
           }}</strong>
           <div class="grid gap-4 sm:grid-cols-2">

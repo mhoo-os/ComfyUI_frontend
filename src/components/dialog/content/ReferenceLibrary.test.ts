@@ -226,3 +226,16 @@ it('invalidates a mask when crop bounds change and preserves a usable crop after
   ).toBeEnabled()
   expect(api.fetchApi).toHaveBeenCalledTimes(1)
 })
+
+it('keeps an approved original available without requiring a crop', async () => {
+  vi.mocked(api.fetchApi).mockResolvedValueOnce(Response.json([asset]))
+  mount()
+  await screen.findByText('Approved')
+  await userEvent.click(
+    screen.getByRole('checkbox', { name: 'Approved references only' })
+  )
+  expect(screen.getByRole('checkbox', { name: 'portrait.png' })).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Use in node' })).toBeEnabled()
+  expect(screen.getByText(/Use the original as-is/)).toBeVisible()
+  expect(screen.queryByText('Needs face selection')).not.toBeInTheDocument()
+})
