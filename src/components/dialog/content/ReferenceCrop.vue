@@ -3,6 +3,7 @@ import {
   computed,
   onBeforeUnmount,
   ref,
+  shallowRef,
   useTemplateRef,
   watchEffect
 } from 'vue'
@@ -18,6 +19,8 @@ import type { Bounds } from '@/renderer/core/layout/types'
 import { api } from '@/scripts/api'
 
 import { detectReferenceFaces, portraitBounds } from './referenceFaces'
+import { cropQuality } from './referenceQuality'
+import { maskReference } from './referenceMask'
 
 const detection = ref<{
   phase: 'loading' | 'ready' | 'failed'
@@ -36,7 +39,9 @@ async function findFaces(image: HTMLImageElement) {
     if (!disposed) detection.value = { phase: 'failed', faces: [] }
   }
 }
+const selectedFace = ref<Bounds | null>(null)
 function selectFace(face: Bounds) {
+  selectedFace.value = face
   bounds.value = portraitBounds(
     face,
     dimensions.value.width,
@@ -56,6 +61,54 @@ const bounds = ref<Bounds>({ x: 0, y: 0, width: 16, height: 16 })
 const phase = ref<'loading' | 'editing' | 'saving' | 'failed'>('loading')
 const error = ref('')
 const fields = ['x', 'y', 'width', 'height'] as const
+const maskState = shallowRef<
+  | { phase: 'idle' | 'loading' | 'failed' }
+  | {
+      phase: 'ready'
+      key: string
+      canvas: HTMLCanvasElement
+      seed: { x: number; y: number }
+    }
+>({ phase: 'idle' })
+const maskKey = computed(() =>
+  JSON.stringify({ bounds: bounds.value, face: selectedFace.value })
+)
+const activeMask = computed(() =>
+  maskState.value.phase === 'ready' && maskState.value.key === maskKey.value
+    ? maskState.value
+    : null
+)
+const quality = computed(() =>
+  cropQuality(bounds.value, detection.value.faces, selectedFace.value)
+)
+async function isolate() {
+  const image = source.value
+  const face = selectedFace.value
+  if (!image || !face || phase.value !== 'editing' || quality.value.clipped)
+    return
+  const key = maskKey.value
+  const rectangle = { ...bounds.value }
+  const seed = {
+    x: (face.x + face.width / 2) / dimensions.value.width,
+    y: (face.y + face.height / 2) / dimensions.value.height
+  }
+  maskState.value = { phase: 'loading' }
+  try {
+    const canvas = await maskReference(image, rectangle, seed)
+    if (!canvas) {
+      if (!disposed) maskState.value = { phase: 'failed' }
+      return
+    }
+    if (!disposed)
+      maskState.value =
+        key === maskKey.value
+          ? { phase: 'ready', key, canvas, seed }
+          : { phase: 'idle' }
+  } catch {
+    if (!disposed) maskState.value = { phase: 'failed' }
+  }
+}
+
 const crop = computed(() =>
   referenceCrop.safeParse({
     parentId: asset.id,
@@ -64,7 +117,14 @@ const crop = computed(() =>
     sourceWidth: dimensions.value.width,
     sourceHeight: dimensions.value.height,
     ...bounds.value,
-    method: 'browser-canvas-crop-v1'
+    method: 'browser-canvas-crop-v1',
+    ...(activeMask.value && {
+      mask: {
+        method: 'mediapipe-magic-touch-v1',
+        seed: activeMask.value.seed,
+        background: 'gray-128'
+      }
+    })
   })
 )
 function loaded() {
@@ -89,9 +149,27 @@ watchEffect(() => {
   const scale = Math.min(1, 600 / Math.max(width, height))
   canvas.width = Math.max(1, Math.round(width * scale))
   canvas.height = Math.max(1, Math.round(height * scale))
-  canvas
-    .getContext('2d')
-    ?.drawImage(image, x, y, width, height, 0, 0, canvas.width, canvas.height)
+  const context = canvas.getContext('2d')
+  if (activeMask.value)
+    context?.drawImage(
+      activeMask.value.canvas,
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    )
+  else
+    context?.drawImage(
+      image,
+      x,
+      y,
+      width,
+      height,
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    )
 })
 function initialSelection(): Bounds {
   const { width, height } = dimensions.value
@@ -134,6 +212,7 @@ async function save() {
       canvas.width,
       canvas.height
     )
+    if (activeMask.value) context.drawImage(activeMask.value.canvas, 0, 0)
     const blob = await new Promise<Blob | null>((resolve) =>
       canvas.toBlob(resolve, 'image/png')
     )
@@ -146,7 +225,8 @@ async function save() {
       headers: {
         'Content-Type': 'image/png',
         'X-File-Name': encodeURIComponent(
-          asset.name.replace(/\.[^.]+$/, '') + '-crop.png'
+          asset.name.replace(/\.[^.]+$/, '') +
+            (activeMask.value ? '-masked-crop.png' : '-crop.png')
         ),
         'X-Reference-Crop': JSON.stringify(selected.data)
       },
@@ -236,7 +316,12 @@ async function save() {
             v-model="bounds"
             :source-width="dimensions.width"
             :source-height="dimensions.height"
-            :disabled="choosingFace || phase !== 'editing' || !crop.success"
+            :disabled="
+              choosingFace ||
+              maskState.phase === 'loading' ||
+              phase !== 'editing' ||
+              !crop.success
+            "
           />
         </div>
       </div>
@@ -264,6 +349,56 @@ async function save() {
         </p>
       </div>
     </div>
+    <div v-if="!choosingFace" class="flex flex-col gap-2">
+      <h4 class="m-0">{{ t('referenceCrop.qualityTitle') }}</h4>
+      <p class="m-0">{{ t('referenceCrop.qualityHelp') }}</p>
+      <p v-if="quality.facePixels !== null" class="m-0">
+        {{ t('referenceCrop.facePixels', { pixels: quality.facePixels }) }}
+      </p>
+      <p v-if="quality.clipped" role="status" class="m-0">
+        {{ t('referenceCrop.clipped') }}
+      </p>
+      <p v-if="quality.neighbors" role="status" class="m-0">
+        {{ t('referenceCrop.neighbors', { count: quality.neighbors }) }}
+      </p>
+      <button
+        type="button"
+        class="self-start rounded-sm border px-3 py-2"
+        :disabled="
+          !selectedFace ||
+          !crop.success ||
+          quality.clipped ||
+          phase !== 'editing' ||
+          maskState.phase === 'loading'
+        "
+        @click="isolate"
+      >
+        {{
+          t(
+            maskState.phase === 'loading'
+              ? 'referenceCrop.maskLoading'
+              : 'referenceCrop.mask'
+          )
+        }}
+      </button>
+      <p v-if="!selectedFace" class="m-0">
+        {{ t('referenceCrop.maskSelect') }}
+      </p>
+      <p v-if="maskState.phase === 'failed'" role="alert">
+        {{ t('referenceCrop.maskFailed') }}
+      </p>
+      <template v-if="activeMask">
+        <p role="status">{{ t('referenceCrop.maskReview') }}</p>
+        <button
+          type="button"
+          :disabled="phase !== 'editing'"
+          class="self-start rounded-sm border px-3 py-2"
+          @click="maskState = { phase: 'idle' }"
+        >
+          {{ t('referenceCrop.removeMask') }}
+        </button>
+      </template>
+    </div>
     <fieldset
       :disabled="phase !== 'editing'"
       class="grid grid-cols-2 gap-3 border-0 p-0 sm:grid-cols-4"
@@ -290,7 +425,12 @@ async function save() {
     <div class="flex flex-wrap gap-3">
       <button
         type="button"
-        :disabled="choosingFace || phase !== 'editing' || !crop.success"
+        :disabled="
+          choosingFace ||
+          maskState.phase === 'loading' ||
+          phase !== 'editing' ||
+          !crop.success
+        "
         class="rounded-sm border px-3 py-2"
         @click="save"
       >

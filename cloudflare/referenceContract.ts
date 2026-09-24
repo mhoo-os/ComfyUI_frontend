@@ -24,7 +24,17 @@ export const referenceCrop = z
     y: z.number().int().nonnegative(),
     width: z.number().int().min(16),
     height: z.number().int().min(16),
-    method: z.literal('browser-canvas-crop-v1')
+    method: z.literal('browser-canvas-crop-v1'),
+    mask: z
+      .object({
+        method: z.literal('mediapipe-magic-touch-v1'),
+        seed: z
+          .object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) })
+          .strict(),
+        background: z.literal('gray-128')
+      })
+      .strict()
+      .optional()
   })
   .strict()
   .refine(

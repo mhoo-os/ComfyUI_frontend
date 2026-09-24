@@ -854,62 +854,72 @@ describe('Private character reference review', () => {
       expect((await review(mf, asset, 'draft')).status).toBe(409)
     }
   )
-  it('saves a crop as a separate draft with lineage and keeps the approved original intact', async () => {
-    const provider = vi.fn(async () => Response.json({}))
-    const mf = await runtime(provider)
-    const original = await describeAsset(mf, await upload(mf))
-    await review(mf, original)
-    const crop = {
-      parentId: original.id,
-      parentRevision: original.revision,
-      parentEtag: original.etag,
-      sourceWidth: 100,
-      sourceHeight: 100,
-      x: 10,
-      y: 20,
-      width: 32,
-      height: 40,
-      method: 'browser-canvas-crop-v1'
-    }
-    const bytes = new Uint8Array(24)
-    bytes.set(png)
-    const view = new DataView(bytes.buffer)
-    view.setUint32(16, 32)
-    view.setUint32(20, 40)
-    const result = await mf.dispatchFetch('https://test/character-assets', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'image/png',
-        'Content-Length': String(bytes.length),
-        'X-Reference-Crop': JSON.stringify(crop)
-      },
-      body: bytes
-    })
-    expect(result.status).toBe(201)
-    const child = await result.json()
-    expect(child).toMatchObject({
-      revision: 1,
-      approval: null,
-      crop,
-      metadata: {
-        character: 'Test subject',
-        era: '2020',
-        subject: '',
-        view: 'unknown'
+  it.for([false, true])(
+    'saves a crop (masked=%s) as a separate draft with lineage and keeps the approved original intact',
+    async (masked) => {
+      const provider = vi.fn(async () => Response.json({}))
+      const mf = await runtime(provider)
+      const original = await describeAsset(mf, await upload(mf))
+      await review(mf, original)
+      const crop = {
+        parentId: original.id,
+        parentRevision: original.revision,
+        parentEtag: original.etag,
+        sourceWidth: 100,
+        sourceHeight: 100,
+        x: 10,
+        y: 20,
+        width: 32,
+        height: 40,
+        method: 'browser-canvas-crop-v1',
+        ...(masked && {
+          mask: {
+            method: 'mediapipe-magic-touch-v1',
+            seed: { x: 0.2, y: 0.4 },
+            background: 'gray-128'
+          }
+        })
       }
-    })
-    const childId = assetSchema.parse(child).id
-    expect(childId).not.toBe(original.id)
-    const listed = z
-      .array(assetSchema)
-      .parse(
-        await (await mf.dispatchFetch('https://test/character-assets')).json()
-      )
-    expect(
-      listed.find((item) => item.id === original.id)?.approval
-    ).toMatchObject({ revision: original.revision, etag: original.etag })
-    expect(provider).not.toHaveBeenCalled()
-  })
+      const bytes = new Uint8Array(24)
+      bytes.set(png)
+      const view = new DataView(bytes.buffer)
+      view.setUint32(16, 32)
+      view.setUint32(20, 40)
+      const result = await mf.dispatchFetch('https://test/character-assets', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'image/png',
+          'Content-Length': String(bytes.length),
+          'X-Reference-Crop': JSON.stringify(crop)
+        },
+        body: bytes
+      })
+      expect(result.status).toBe(201)
+      const child = await result.json()
+      expect(child).toMatchObject({
+        revision: 1,
+        approval: null,
+        crop,
+        metadata: {
+          character: 'Test subject',
+          era: '2020',
+          subject: '',
+          view: 'unknown'
+        }
+      })
+      const childId = assetSchema.parse(child).id
+      expect(childId).not.toBe(original.id)
+      const listed = z
+        .array(assetSchema)
+        .parse(
+          await (await mf.dispatchFetch('https://test/character-assets')).json()
+        )
+      expect(
+        listed.find((item) => item.id === original.id)?.approval
+      ).toMatchObject({ revision: original.revision, etag: original.etag })
+      expect(provider).not.toHaveBeenCalled()
+    }
+  )
   it.for(['stale', 'outside', 'dimensions'] as const)(
     'rejects a %s crop without creating an asset',
     async (mode) => {

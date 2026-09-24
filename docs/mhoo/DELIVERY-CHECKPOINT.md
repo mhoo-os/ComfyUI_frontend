@@ -228,3 +228,20 @@ necessary for some photos. Nine targeted tests, full build/typechecks, full lint
 (existing warnings), knip and commit hooks pass. Vendor runtime files are excluded
 from source formatting/linting and explicitly declared runtime entries for knip.
 No backend, provider, training or approval-state changes in this release.
+
+## Optional masking and measured crop checks — 25 September 2026
+
+Continues same job/branch; Room progress write now succeeds (revision 2).
+Implemented optional browser-only Magic Touch v1 subject segmentation with a
+user-selected face center as the seed. Existing MediaPipe runtime reused, model
+self-hosted. Inference input capped at 1024px; foreground pixels sampled from the
+native original, background composited gray. No generative restoration. A changed
+crop/selected face invalidates the mask; failed segmentation retains the ordinary
+crop. Asset lineage records client-declared mask method/seed/background and always
+saves draft. It is not proof of identity or server-verified pixel processing.
+
+Checks report source face size, crop size, clipped selected face and intersecting
+neighbor detections. They cannot certify training suitability or detect missed
+faces. Mask edges remain subject to explicit review. 13 UI/helper tests and 53
+backend tests pass; backend deployed 3268c60a-5fd8-4b5b-a45a-e87b0bfa19b0.
+Frontend final build and live segmentation acceptance in progress.

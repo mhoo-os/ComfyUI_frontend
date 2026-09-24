@@ -5490,6 +5490,18 @@
       "failed": "Face detection could not load. You can select a crop manually or reopen to retry.",
       "empty": "No faces found. Select a crop manually for this photo."
     },
-    "adjust": "Review the suggested crop. Adjust if needed, then save as draft."
+    "adjust": "Review the suggested crop. Adjust if needed, then save as draft.",
+    "qualityTitle": "Crop checks",
+    "qualityHelp": "Measured from detected face boxes. Missed faces and mask errors still need your review. These checks do not certify training quality.",
+    "facePixels": "Selected face: about {pixels} pixels on its shorter side.",
+    "clipped": "The crop cuts into the selected face box. Expand it before masking.",
+    "neighbors": "Other detected face boxes overlap this crop: {count}. Check for neighboring people.",
+    "mask": "Try subject mask",
+    "maskLoading": "Isolating selected subject on this device…",
+    "maskSelect": "Select a detected face to use subject masking.",
+    "maskFailed": "Could not isolate the subject. Keep the original crop or try again.",
+    "maskReview": "Mask preview: check hair, glasses, ears, and neighboring people. Saving keeps this as a separate draft; no facial restoration was applied. Changing the crop clears this mask.",
+    "removeMask": "Remove mask",
+    "maskedAsset": "Subject mask applied · review edges and likeness"
   }
 }

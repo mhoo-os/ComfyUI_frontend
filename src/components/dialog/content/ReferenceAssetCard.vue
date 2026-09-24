@@ -48,6 +48,9 @@ const { t } = useI18n()
         })
       }}
     </p>
+    <p v-if="asset.crop?.mask" class="m-0">
+      {{ t('referenceCrop.maskedAsset') }}
+    </p>
     <div class="flex flex-wrap gap-2">
       <button
         type="button"

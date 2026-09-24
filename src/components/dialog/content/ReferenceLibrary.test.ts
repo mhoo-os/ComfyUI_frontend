@@ -9,6 +9,7 @@ import { api } from '@/scripts/api'
 
 import ReferenceLibrary from './ReferenceLibrary.vue'
 import * as referenceFaces from './referenceFaces'
+import * as referenceMask from './referenceMask'
 
 const asset = referenceAsset.parse({
   id: '2bf4de45-6926-4b44-bd5a-62d6e72537b1',
@@ -166,6 +167,60 @@ it('lets the user select a detected face before saving a suggested crop', async 
   expect(
     screen.getByRole('spinbutton', { name: 'Width (pixels)' })
   ).toHaveValue(160)
+  expect(
+    screen.getByRole('button', { name: 'Save crop as draft' })
+  ).toBeEnabled()
+  expect(api.fetchApi).toHaveBeenCalledTimes(1)
+})
+
+it('invalidates a mask when crop bounds change and preserves a usable crop after mask failure', async () => {
+  vi.mocked(api.fetchApi).mockResolvedValueOnce(Response.json([asset]))
+  vi.mocked(referenceFaces.detectReferenceFaces).mockResolvedValueOnce([
+    { x: 200, y: 100, width: 80, height: 100 }
+  ])
+  const output = document.createElement('canvas')
+  output.width = 160
+  output.height = 265
+  const segment = vi
+    .spyOn(referenceMask, 'maskReference')
+    .mockResolvedValueOnce(output)
+    .mockResolvedValueOnce(null)
+  mount()
+  await screen.findByText('Approved')
+  await userEvent.click(screen.getByRole('button', { name: 'Crop' }))
+  const original = screen.getByRole('img', { name: 'portrait.png' })
+  Object.defineProperties(original, {
+    naturalWidth: { value: 720 },
+    naturalHeight: { value: 538 }
+  })
+  await fireEvent.load(original)
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Select face 1' })
+  )
+  await userEvent.click(
+    screen.getByRole('button', { name: 'Try subject mask' })
+  )
+  expect(
+    await screen.findByRole('button', { name: 'Remove mask' })
+  ).toBeVisible()
+  expect(segment).toHaveBeenCalledWith(
+    original,
+    expect.objectContaining({ x: 160, width: 160 }),
+    { x: 240 / 720, y: 150 / 538 }
+  )
+  await fireEvent.update(
+    screen.getByRole('spinbutton', { name: 'Width (pixels)' }),
+    '161'
+  )
+  expect(
+    screen.queryByRole('button', { name: 'Remove mask' })
+  ).not.toBeInTheDocument()
+  await userEvent.click(
+    screen.getByRole('button', { name: 'Try subject mask' })
+  )
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Could not isolate'
+  )
   expect(
     screen.getByRole('button', { name: 'Save crop as draft' })
   ).toBeEnabled()
