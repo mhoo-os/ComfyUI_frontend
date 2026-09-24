@@ -566,3 +566,289 @@ it('checkpoints Jev and Astra before one video submission in real Workflows', as
     'status'
   ])
 }, 20000)
+
+describe('Private character reference review', () => {
+  const png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0])
+  const assetSchema = z.object({
+    id: z.string(),
+    revision: z.number(),
+    etag: z.string(),
+    approval: z.unknown()
+  })
+  async function upload(mf: Miniflare) {
+    const response = await mf.dispatchFetch('https://test/character-assets', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'image/png',
+        'X-File-Name': 'reference.png',
+        'Content-Length': String(png.length)
+      },
+      body: png
+    })
+    expect(response.status).toBe(201)
+    return assetSchema.parse(await response.json())
+  }
+  async function describeAsset(
+    mf: Miniflare,
+    asset: z.infer<typeof assetSchema>
+  ) {
+    const response = await mf.dispatchFetch(
+      `https://test/character-assets/${asset.id}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          revision: asset.revision,
+          metadata: {
+            character: 'Test subject',
+            era: '2020',
+            subject: 'Left person in white shirt',
+            view: 'front'
+          }
+        })
+      }
+    )
+    expect(response.status).toBe(200)
+    return assetSchema.parse(await response.json())
+  }
+  async function review(
+    mf: Miniflare,
+    asset: z.infer<typeof assetSchema>,
+    action = 'approve'
+  ) {
+    return mf.dispatchFetch('https://test/character-assets/review', {
+      method: 'POST',
+      body: JSON.stringify({
+        items: [{ id: asset.id, revision: asset.revision, etag: asset.etag }],
+        action
+      })
+    })
+  }
+  function referenceGraph(asset: z.infer<typeof assetSchema>) {
+    return {
+      '1': {
+        class_type: 'HiggsfieldCampaign',
+        inputs: {
+          prompt: 'A portrait',
+          image_url: `mhoo-asset:${asset.id}:${asset.revision}`
+        }
+      }
+    }
+  }
+  it('keeps draft bytes private, blocks draft queueing and estimates without contacting provider', async () => {
+    const provider = vi.fn(async () => Response.json({}))
+    const mf = await runtime(provider)
+    const asset = await upload(mf)
+    expect(asset.approval).toBeNull()
+    const preview = await mf.dispatchFetch(
+      `https://test/character-assets/${asset.id}/preview`
+    )
+    expect(preview.headers.get('cache-control')).toBe('private, no-store')
+    expect(new Uint8Array(await preview.arrayBuffer())).toEqual(png)
+    for (const path of ['/prompt', '/higgsfield/estimate']) {
+      const response = await mf.dispatchFetch(`https://test${path}`, {
+        method: 'POST',
+        body: JSON.stringify({ prompt: referenceGraph(asset) })
+      })
+      expect(response.status).toBe(400)
+    }
+    expect(provider).not.toHaveBeenCalled()
+  })
+  it('estimates approved references without upload and clears approval on metadata changes', async () => {
+    const paths: string[] = []
+    const mf = await runtime(async (request) => {
+      paths.push(new URL(request.url).pathname)
+      expect(await request.json()).toMatchObject({
+        image_urls: ['https://example.com/approved-reference.jpg']
+      })
+      return Response.json({ type: 'estimate', usd: '0.1', credits: '1' })
+    })
+    const draft = await upload(mf)
+    const asset = await describeAsset(mf, draft)
+    expect((await review(mf, asset)).status).toBe(200)
+    expect(
+      (
+        await mf.dispatchFetch('https://test/higgsfield/estimate', {
+          method: 'POST',
+          body: JSON.stringify({ prompt: referenceGraph(asset) })
+        })
+      ).status
+    ).toBe(200)
+    expect(paths).toEqual(['/estimate/marketing-studio/image'])
+    const changed = await describeAsset(mf, asset)
+    expect(changed.approval).toBeNull()
+    expect((await review(mf, asset)).status).toBe(409)
+    expect(
+      (
+        await mf.dispatchFetch('https://test/prompt', {
+          method: 'POST',
+          body: JSON.stringify({ prompt: referenceGraph(asset) })
+        })
+      ).status
+    ).toBe(400)
+    expect(paths).toHaveLength(1)
+  })
+  it('resolves approved bytes only at execution and never sends a private token to generation', async () => {
+    const paths: string[] = []
+    const mf = await runtime(async (request) => {
+      const path = new URL(request.url).pathname
+      paths.push(path)
+      if (path === '/files/generate-upload-url')
+        return Response.json({
+          public_url: 'https://provider.example/reference.png',
+          upload_url: 'https://provider.example/upload',
+          upload_headers: {}
+        })
+      if (path === '/upload') {
+        expect(new Uint8Array(await request.arrayBuffer())).toEqual(png)
+        return new Response(null, { status: 200 })
+      }
+      if (path === '/marketing-studio/image') {
+        expect(await request.json()).toMatchObject({
+          image_urls: ['https://provider.example/reference.png'],
+          prompt: expect.stringContaining('Left person in white shirt')
+        })
+        return Response.json({ request_id: requestId, status: 'queued' })
+      }
+      return Response.json({ request_id: requestId, status: 'in_progress' })
+    })
+    const asset = await describeAsset(mf, await upload(mf))
+    await review(mf, asset)
+    await queue(mf, referenceGraph(asset))
+    expect(paths).toEqual([])
+    await tick(mf)
+    expect(paths.slice(0, 3)).toEqual([
+      '/files/generate-upload-url',
+      '/upload',
+      '/marketing-studio/image'
+    ])
+  })
+  it('rechecks revocation after enqueue and rejects invalid image bytes', async () => {
+    const provider = vi.fn(async () => Response.json({}))
+    const mf = await runtime(provider)
+    const invalid = await mf.dispatchFetch('https://test/character-assets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'image/png' },
+      body: 'not an image file'
+    })
+    expect(invalid.status).toBe(400)
+    const asset = await describeAsset(mf, await upload(mf))
+    await review(mf, asset)
+    await queue(mf, referenceGraph(asset))
+    await review(mf, asset, 'draft')
+    await tick(mf)
+    expect(provider).not.toHaveBeenCalled()
+    expect(await jobs(mf)).toMatchObject({ jobs: [{ status: 'failed' }] })
+  })
+  it('rejects an entire stale batch without approving the other selected asset', async () => {
+    const mf = await runtime(async () => Response.json({}))
+    const first = await describeAsset(mf, await upload(mf))
+    const second = await describeAsset(mf, await upload(mf))
+    const response = await mf.dispatchFetch(
+      'https://test/character-assets/review',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'approve',
+          items: [first, { ...second, revision: 1 }].map(
+            ({ id, revision, etag }) => ({ id, revision, etag })
+          )
+        })
+      }
+    )
+    expect(response.status).toBe(409)
+    const list = await (
+      await mf.dispatchFetch('https://test/character-assets')
+    ).json()
+    expect(
+      z
+        .array(assetSchema)
+        .parse(list)
+        .every((asset) => asset.approval === null)
+    ).toBe(true)
+  })
+  it('holds approval through an in-flight transfer and refuses revocation until submission ends', async () => {
+    let release: () => void = () => {}
+    let started: () => void = () => {}
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const transferring = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const mf = await runtime(async (request) => {
+      const path = new URL(request.url).pathname
+      if (path === '/files/generate-upload-url')
+        return Response.json({
+          public_url: 'https://provider.example/reference.png',
+          upload_url: 'https://provider.example/upload',
+          upload_headers: {}
+        })
+      if (path === '/upload') {
+        started()
+        await blocked
+        return new Response(null)
+      }
+      return Response.json({ request_id: requestId, status: 'in_progress' })
+    })
+    const asset = await describeAsset(mf, await upload(mf))
+    await review(mf, asset)
+    await queue(mf, referenceGraph(asset))
+    const running = tick(mf)
+    await transferring
+    try {
+      expect((await review(mf, asset, 'draft')).status).toBe(409)
+      const patch = await mf.dispatchFetch(
+        `https://test/character-assets/${asset.id}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({
+            revision: asset.revision,
+            metadata: { character: 'Changed' }
+          })
+        }
+      )
+      expect(patch.status).toBe(409)
+    } finally {
+      release()
+      await running
+    }
+    expect((await review(mf, asset, 'draft')).status).toBe(200)
+  })
+  it('rejects private tokens in prompts before contacting the provider', async () => {
+    const provider = vi.fn(async () => Response.json({}))
+    const mf = await runtime(provider)
+    const asset = await describeAsset(mf, await upload(mf))
+    await review(mf, asset)
+    const response = await mf.dispatchFetch('https://test/prompt', {
+      method: 'POST',
+      body: JSON.stringify({
+        prompt: {
+          '1': {
+            class_type: 'HiggsfieldSoul',
+            inputs: { prompt: `Use mhoo-asset:${asset.id}:${asset.revision}` }
+          }
+        }
+      })
+    })
+    expect(response.status).toBe(400)
+    expect(provider).not.toHaveBeenCalled()
+  })
+  it('retains the submission lock when provider acceptance is uncertain', async () => {
+    const mf = await runtime(async (request) => {
+      const path = new URL(request.url).pathname
+      if (path === '/files/generate-upload-url')
+        return Response.json({
+          public_url: 'https://provider.example/reference.png',
+          upload_url: 'https://provider.example/upload',
+          upload_headers: {}
+        })
+      if (path === '/upload') return new Response(null)
+      return new Response('upstream connection lost', { status: 502 })
+    })
+    const asset = await describeAsset(mf, await upload(mf))
+    await review(mf, asset)
+    await queue(mf, referenceGraph(asset))
+    await tick(mf)
+    expect((await review(mf, asset, 'draft')).status).toBe(409)
+  })
+})

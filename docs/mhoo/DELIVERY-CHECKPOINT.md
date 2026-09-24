@@ -129,3 +129,32 @@ transcript and stable sampled character/composition. No release blocker; face
 shadow/size limits precise lip-sync assessment from stills.
 Delivery Room read succeeded, but metadata remains revision 1 with old fork-only
 scope; previous unconfirmed save is still pending, not treated as acceptance.
+
+## Private character reference library — 25 September 2026
+
+Continued job comfyui-frontend-fork-20260924 in the same checkout and branch.
+Added authenticated private R2 reference ingestion, DO metadata and revision/ETag
+approval, batch review, and a native Vue library dialog on image-input nodes.
+No D1, new credentials or public R2 URLs. Limits: 200 photos, 20 MB per image,
+20 files per UI upload, 50 per atomic review batch. Magic signature/stream-length
+validation does not claim full image decoding. Year can remain unknown; era,
+character, subject selection and view are required for approval.
+
+Drafts and stale tokens fail before provider calls; estimate substitutes a dummy
+URL without sending bytes. Execution holds a persisted five-minute reference
+lease during provider upload/submission. Edits/revokes return 409 while leased;
+ambiguous failures keep the lease to expire safely. Revocation blocks future use,
+not an already-transmitted provider copy. Saved metadata edits clear approval.
+Tokens accepted only in image fields. Group-photo subject text is a prompt hint,
+not an identity guarantee; this MVP has no crop editor or Soul training endpoint.
+Human keyframe approval remains a separate outstanding production feature.
+
+Evidence: 47 backend tests, 3 UI behavior tests, full typecheck, backend typecheck,
+full lint, knip and deployment dry-run pass. Reviewer found transfer/revoke race
+and text-field token acceptance; both fixed with regression tests. Existing
+capture-year optional behavior retained intentionally (unknown dates must not
+be invented). No real photos or paid generations used in automated tests.
+Release and live visual verification in progress; not yet claimed delivered.
+Delivery Room read/evaluator succeeds but old revision-1 metadata still lacks
+steps/evidence/Linear association. Update remains pending after prior
+DELIVERY_ROOM_REQUEST_UNCONFIRMED; checkpoint is current evidence.

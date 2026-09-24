@@ -113,3 +113,18 @@ Multi-shot cuts/fades and supplied background-music mixing already exist in the
 finishing nodes. Automatic music selection/generation, consistent character and
 voice references, speaker assignment and multi-character dialogue need separate
 acceptance. This single-shot run does not validate those capabilities.
+
+### Private source reference review
+
+Image-input nodes now offer a character-reference library: private R2 ingestion,
+era/subject metadata, atomic batch approval and revision-bound canvas tokens.
+Only approved references transfer server-side to Higgsfield when their node runs.
+Estimates do not transfer photos. Revoking approval prevents future use and does
+not remove copies already sent to a provider. Active submissions briefly lock
+review/metadata changes, up to five minutes following an ambiguous failure.
+
+This is source-photo review, not Soul ID training or generated-keyframe approval.
+No verified Soul training API/minimum dataset is implemented. Group-photo
+selection uses an explicit subject description; crop extraction and identity
+continuity evaluation remain gaps. Existing direct Higgsfield upload buttons
+remain a separate explicitly initiated transfer path, not private-library ingest.

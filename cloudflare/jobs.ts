@@ -1,3 +1,4 @@
+import { ReferenceLibrary } from './references'
 import { DurableObject } from 'cloudflare:workers'
 import { z } from 'zod'
 
@@ -216,6 +217,10 @@ export class ComfyJobs extends DurableObject<Env> {
     const url = new URL(request.url)
     const path = url.pathname
     try {
+      if (path === '/character-assets' || path.startsWith('/character-assets/'))
+        return await new ReferenceLibrary(this.ctx.storage, this.env).handle(
+          request
+        )
       if (
         path === '/ws' &&
         request.headers.get('Upgrade')?.toLowerCase() === 'websocket'
@@ -241,6 +246,15 @@ export class ComfyJobs extends DurableObject<Env> {
       if (path === '/prompt' && request.method === 'POST') {
         const body = submissionSchema.parse(await boundedJson(request))
         const { graph, order } = planGraph(body.prompt)
+        for (const node of Object.values(graph)) {
+          for (const value of Object.values(node.inputs)) {
+            if (typeof value === 'string' && value.startsWith('mhoo-asset:'))
+              await new ReferenceLibrary(this.ctx.storage, this.env).resolve(
+                { image_url: value },
+                true
+              )
+          }
+        }
         return await this.ctx.blockConcurrencyWhile(async () => {
           if (await this.ctx.storage.get('active'))
             return json(
@@ -293,7 +307,11 @@ export class ComfyJobs extends DurableObject<Env> {
           await provider(
             this.env,
             `estimate/${models[node.class_type].endpoint}`,
-            resolveInputs(node, {})
+            await new ReferenceLibrary(this.ctx.storage, this.env).resolve(
+              resolveInputs(node, {}),
+              true,
+              models[node.class_type].schema.properties.prompt.maxLength ?? 8000
+            )
           )
         )
       }
@@ -663,10 +681,11 @@ export class ComfyJobs extends DurableObject<Env> {
         await this.save(job)
         this.broadcast('executing', { node: nodeId, prompt_id: job.id })
         const result = resultSchema.parse(
-          await provider(
-            this.env,
-            models[node.class_type].endpoint,
-            resolveInputs(node, job.outputs)
+          await new ReferenceLibrary(this.ctx.storage, this.env).submit(
+            resolveInputs(node, job.outputs),
+            models[node.class_type].schema.properties.prompt.maxLength ?? 8000,
+            (input) =>
+              provider(this.env, models[node.class_type].endpoint, input)
           )
         )
         job.requestId = result.request_id

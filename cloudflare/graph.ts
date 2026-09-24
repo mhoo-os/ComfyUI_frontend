@@ -1,3 +1,4 @@
+import { referenceToken } from './referenceContract'
 import { z } from 'zod'
 
 import type { EditValue } from './finishing'
@@ -228,7 +229,22 @@ export function resolveInputs(
       !z.string().uuid().safeParse(value).success
     )
       throw new Error(`${key} must be a UUID.`)
-    if (key.endsWith('_url')) {
+    if (
+      typeof value === 'string' &&
+      value.includes('mhoo-asset:') &&
+      !(
+        ['image_url', 'end_image_url'].includes(key) &&
+        referenceToken.test(value)
+      )
+    )
+      throw new Error('Private references are only supported in image inputs.')
+    if (
+      key.endsWith('_url') &&
+      !(
+        ['image_url', 'end_image_url'].includes(key) &&
+        referenceToken.test(String(value))
+      )
+    ) {
       const url = new URL(String(value))
       if (
         url.protocol !== 'https:' ||

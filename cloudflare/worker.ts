@@ -160,7 +160,9 @@ export default {
           '/view',
           '/higgsfield/estimate'
         ].includes(path) ||
-        path.startsWith('/jobs/')
+        path.startsWith('/jobs/') ||
+        path === '/character-assets' ||
+        path.startsWith('/character-assets/')
       ) {
         const internal = new URL(request.url)
         internal.pathname = path

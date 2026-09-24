@@ -1,3 +1,6 @@
+import type { ReferenceAsset } from '../../../cloudflare/referenceContract'
+import ReferenceLibrary from '@/components/dialog/content/ReferenceLibrary.vue'
+import { useDialogStore } from '@/stores/dialogStore'
 import { z } from 'zod'
 
 import { t } from '@/i18n'
@@ -38,6 +41,42 @@ app.registerExtension({
         ].includes(widget.name)
       )
         continue
+      if (!production && ['image_url', 'end_image_url'].includes(widget.name)) {
+        node.addWidget(
+          'button',
+          t('referenceLibrary.title'),
+          '',
+          () => {
+            const graph = node.graph
+            useDialogStore().showDialog({
+              key: 'character-references',
+              component: ReferenceLibrary,
+              props: {
+                onUse: (asset: ReferenceAsset) => {
+                  if (
+                    !graph ||
+                    app.graph !== graph ||
+                    graph.getNodeById(node.id) !== node ||
+                    !node.widgets?.includes(widget)
+                  ) {
+                    useToastStore().addAlert(
+                      t('referenceLibrary.canvasChanged')
+                    )
+                    return
+                  }
+                  const token = `mhoo-asset:${asset.id}:${asset.revision}`
+                  widget.value = token
+                  widget.callback?.(token)
+                  node.setDirtyCanvas(true, true)
+                  useDialogStore().closeDialog({ key: 'character-references' })
+                }
+              },
+              dialogComponentProps: { renderer: 'reka', size: 'lg' }
+            })
+          },
+          { serialize: false }
+        )
+      }
       node.addWidget(
         'button',
         t('higgsfield.upload', { input: widget.name }),
