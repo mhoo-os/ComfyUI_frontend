@@ -282,3 +282,11 @@ are not changed. Results are session-local and recomputed; originals remain inta
 Thirteen screening/library tests pass and changed-file ESLint passes. Library tests
 stub the independently tested screening child to avoid consuming detector mocks.
 Full build and live batch verification pending below.
+
+Live acceptance: source 60b954d, Pages https://27fddc66.mhoo-comfy.pages.dev.
+Full build and commit checks passed; 13 tests passed. Current library has 32 assets
+across 19 original/derivative groups. Automatic scan completed 19/19 with 8 candidates
+and 11 exceptions: 7 small faces, 1 possible softness, 1 group and 2 no detections.
+No measurement failures.
+No approval changed. Candidate quality does not verify subject identity; family
+carousel 2 remains identity-unconfirmed. UI results verified on production tab.
