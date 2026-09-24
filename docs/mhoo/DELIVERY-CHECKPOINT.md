@@ -302,3 +302,14 @@ route/UI integration and actual training remain pending; no paid request sent.
 User asked to switch to Soul2; requested spending cap for training + first portrait.
 Source docs: https://docs.higgsfield.ai/docs/models/soul-id/create-character.md
 and https://docs.higgsfield.ai/docs/models/soul-2/generate.md.
+
+Soul ID live integration (2026-09-25): user authorized US$7 total for training
+and first portrait. Worker c82b0839-59a5-43c1-80f6-cb7f993f2a4c and Pages
+https://7b94c4b8.mhoo-comfy.pages.dev deployed. Backend tests 56/56 pass;
+full Higgsfield build and changed-file ESLint pass. UI selects approved references,
+submits one persisted attempt, and polls its reference UUID. Ambiguous submits
+are preserved without automatic retry. Training submitted once through production
+UI using two inspected adult references; provider transitioned not_ready → queued
+→ in_progress. Private job and reference details are in the local production-v1
+pack. Portrait canvas prepared; live estimate US$0.006. No portrait submitted yet.
+Listed training price US$2.50; actual billing not yet reconciled.

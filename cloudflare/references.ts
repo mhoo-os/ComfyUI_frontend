@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { soulTraining } from './soulTraining'
 
 import {
   referenceMetadata,
@@ -62,6 +63,11 @@ export class ReferenceLibrary {
 
   async handle(request: Request): Promise<Response> {
     const path = new URL(request.url).pathname
+    if (
+      path === '/character-assets/training' ||
+      path.startsWith('/character-assets/training/')
+    )
+      return soulTraining(request, this.storage, this.env, this, smallJson)
     const respond = (value: unknown, status = 200) =>
       Response.json(value, { status, headers: { 'cache-control': 'no-store' } })
     if (path === '/character-assets' && request.method === 'GET') {

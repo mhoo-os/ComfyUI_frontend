@@ -26,7 +26,13 @@ export type ProviderResult = z.infer<typeof resultSchema>
 export async function provider(
   env: Env,
   path: string,
-  input?: Input
+  input?:
+    | Input
+    | {
+        name: string
+        model_version: 'v2'
+        input_images: { type: 'image_url'; image_url: string }[]
+      }
 ): Promise<unknown> {
   const credentials = await env.HF_CREDENTIALS.get()
   if (!credentials) throw new Error('Higgsfield credentials are unavailable.')

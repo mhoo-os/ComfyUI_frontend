@@ -12,6 +12,7 @@ import { api } from '@/scripts/api'
 
 import ReferenceCrop from './ReferenceCrop.vue'
 import ReferenceScreening from './ReferenceScreening.vue'
+import SoulTraining from './SoulTraining.vue'
 import ReferenceAssetCard from './ReferenceAssetCard.vue'
 import { groupReferences } from './referenceGroups'
 
@@ -245,6 +246,10 @@ onMounted(() => {
             : t(`referenceLibrary.${operation}`)
         }}
       </p>
+      <SoulTraining
+        v-if="!cropping && operation === 'idle'"
+        :assets="assets.filter((asset) => selected.includes(asset.id))"
+      />
       <ReferenceScreening
         v-if="!cropping && assets.length && operation === 'idle'"
         :assets="groups.map((group) => group.current ?? group.original)"

@@ -653,6 +653,57 @@ describe('Private character reference review', () => {
     }
     expect(provider).not.toHaveBeenCalled()
   })
+  it('trains approved references once and polls the returned character ID', async () => {
+    let trainingCalls = 0
+    const mf = await runtime(async (request) => {
+      const path = new URL(request.url).pathname
+      if (path === '/files/generate-upload-url')
+        return Response.json({
+          public_url: 'https://cdn.example.com/portrait.jpg',
+          upload_url: 'https://upload.example.com/file',
+          upload_headers: {}
+        })
+      if (path === '/file') return new Response('')
+      if (request.method === 'POST') {
+        trainingCalls++
+        expect(await request.json()).toMatchObject({
+          model_version: 'v2',
+          input_images: [
+            {
+              type: 'image_url',
+              image_url: 'https://cdn.example.com/portrait.jpg'
+            }
+          ]
+        })
+        return Response.json({ id: requestId, status: 'queued' })
+      }
+      return Response.json({ id: requestId, status: 'completed' })
+    })
+    const asset = await describeAsset(mf, await upload(mf))
+    const input = {
+      attemptId: requestId,
+      name: 'Adult reference',
+      references: [`mhoo-asset:${asset.id}:${asset.revision}`]
+    }
+    const send = () =>
+      mf.dispatchFetch('https://test/character-assets/training', {
+        method: 'POST',
+        body: JSON.stringify(input)
+      })
+    expect((await send()).status).toBe(400)
+    expect(trainingCalls).toBe(0)
+    await review(mf, asset)
+    expect((await send()).status).toBe(200)
+    expect((await send()).status).toBe(200)
+    expect(trainingCalls).toBe(1)
+    const status = await mf.dispatchFetch(
+      `https://test/character-assets/training/${requestId}`
+    )
+    expect(await status.json()).toMatchObject({
+      status: 'completed',
+      referenceId: requestId
+    })
+  })
   it('estimates approved references without upload and clears approval on metadata changes', async () => {
     const paths: string[] = []
     const mf = await runtime(async (request) => {
