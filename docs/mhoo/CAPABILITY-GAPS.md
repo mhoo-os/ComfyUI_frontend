@@ -63,3 +63,18 @@ See [PIPELINE-VALIDATION.md](PIPELINE-VALIDATION.md) for the schema-checked corr
 ## Canvas finishing update
 
 Clip, Sequence, Compose and Export now execute on Cloudflare Containers with FFmpeg and private R2 outputs. The native canvas and saved history cover basic cuts/fades, trim/order, static caption/logo, audio mixing and MP4 export. Live finished-video acceptance passed using a built-in generated image with deterministic motion (no Higgsfield generation charges). See [PRODUCTION-FINISHING.md](PRODUCTION-FINISHING.md) for limits, exact remaining gaps and deployment evidence.
+
+## Talking shot and agent planning — 25 September 2026
+
+The new Script → Talking Shot node compiles separate scene/dialogue into a
+verified Seedance 2.5 text-to-video request. Choose template or Jev/Astra; preview
+the request before Run. AI preview uses planner tokens but no Higgsfield credits.
+The live gateway planner passed (Jev 1.352s, Astra 5.808s on one sample). New
+talking-shot jobs use Workflows with the existing DO submission ledger and native
+history. Local real-Workflows tests use simulated provider media; they do not
+prove production speech quality. Exact dialogue, lip-sync and identity remain
+best-effort/unverified until an authorized paid video acceptance run.
+
+Preview then Run in AI mode drafts twice; approved-plan reuse is not implemented.
+Jev's 0.7 confidence cutoff is provisional, not calibrated. Character locking,
+audio-track-driven lipsync and one-click paid WebMCP approval remain gaps.

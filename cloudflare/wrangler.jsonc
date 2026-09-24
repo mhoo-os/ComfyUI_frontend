@@ -17,7 +17,8 @@
     "PAGES_ORIGIN": "https://mhoo-comfy.pages.dev",
     "ACCESS_TEAM_DOMAIN": "https://mhoo.cloudflareaccess.com",
     "ACCESS_AUD": "a7cd3a8f02250d37b9795c8ce3e198a1de6ce687b68946860389bf5786f5ae05",
-    "OWNER_EMAIL": "tanyawit@mhoooo.com"
+    "OWNER_EMAIL": "tanyawit@mhoooo.com",
+    "PLANNER_GATEWAY_URL": "https://gateway.ai.cloudflare.com/v1/faca04363f6ba617faedaae7d3493769/default"
   },
   "kv_namespaces": [
     {
@@ -30,6 +31,11 @@
       "binding": "HF_CREDENTIALS",
       "store_id": "c3986cf43eea48beb904549dd8d574ac",
       "secret_name": "HF_CREDENTIALS"
+    },
+    {
+      "binding": "PLANNER_GATEWAY_AUTH",
+      "store_id": "c3986cf43eea48beb904549dd8d574ac",
+      "secret_name": "mhoo_workbench_cf_aig_token"
     }
   ],
   "durable_objects": {
@@ -70,6 +76,13 @@
       "image": "./renderer/Dockerfile",
       "instance_type": "standard-2",
       "max_instances": 1
+    }
+  ],
+  "workflows": [
+    {
+      "binding": "COMFY_PRODUCTION",
+      "name": "mhoo-comfy-production",
+      "class_name": "ComfyProduction"
     }
   ]
 }

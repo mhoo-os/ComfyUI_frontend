@@ -7,6 +7,7 @@ import { renderVideo } from './rendering'
 import { models, planGraph, resolveInputs } from './graph'
 import type { Graph, Media } from './graph'
 import { archiveMedia, readMedia } from './media'
+import { talkingShotSchema } from './talkingShot'
 import { provider, resultMedia, resultSchema } from './provider'
 
 const submissionSchema = z.object({
@@ -29,6 +30,10 @@ type Job = {
   outputs: Record<string, Media[]>
   edits?: Record<string, EditValue>
   rendering?: boolean
+  runner?: 'workflow'
+  workflowDelay?: number
+  workflowStarts?: number
+  plannedScenes?: Record<string, string>
   requestId?: string
   providerRequests?: Record<string, string>
   submitting?: boolean
@@ -110,6 +115,7 @@ function jobDetail(job: Job) {
   )
   return {
     id: job.id,
+    runner: job.runner ?? 'durable-object',
     provider_request_id: job.requestId,
     provider_requests: job.providerRequests ?? {},
     last_poll_error: job.lastPollError,
@@ -259,7 +265,10 @@ export class ComfyJobs extends DurableObject<Env> {
             created: Date.now(),
             updated: Date.now(),
             index: 0,
-            outputs: {}
+            outputs: {},
+            ...(order.some(
+              (node) => graph[node].class_type === 'HiggsfieldTalkingShot'
+            ) && { runner: 'workflow' as const })
           }
           await this.save(job)
           await this.ctx.storage.put('active', id)
@@ -380,7 +389,7 @@ export class ComfyJobs extends DurableObject<Env> {
             return json({})
           job.cancelRequested = true
           await this.ctx.storage.put(`job:${job.id}`, job)
-          if (!(await this.ctx.storage.getAlarm()))
+          if (job.runner !== 'workflow' && !(await this.ctx.storage.getAlarm()))
             await this.ctx.storage.setAlarm(Date.now() + 1000)
           return json({ cancel_requested: true })
         })
@@ -404,10 +413,138 @@ export class ComfyJobs extends DurableObject<Env> {
   webSocketClose(socket: WebSocket) {
     socket.close()
   }
+  private workflowInFlight?: {
+    id: string
+    promise: Promise<{ done: boolean; status: string; delay: number }>
+  }
+
+  private async schedule(job: Job, delay: number) {
+    if (job.runner === 'workflow') {
+      job.workflowDelay = delay
+      await this.save(job)
+    } else await this.ctx.storage.setAlarm(Date.now() + delay)
+  }
+
+  async workflowPlans(id: string) {
+    const job = await this.ctx.storage.get<Job>(`job:${id}`)
+    if (!job || job.runner !== 'workflow')
+      throw new Error('Workflow job not found.')
+    return job.order.flatMap((nodeId) => {
+      const node = job.graph[nodeId]
+      if (
+        node.class_type !== 'HiggsfieldTalkingShot' ||
+        node.inputs.planner !== 'jev_astra'
+      )
+        return []
+      return [{ nodeId, shot: talkingShotSchema.parse(node.inputs) }]
+    })
+  }
+
+  async applyWorkflowScene(id: string, nodeId: string, scene: string) {
+    await this.ctx.blockConcurrencyWhile(async () => {
+      const job = await this.ctx.storage.get<Job>(`job:${id}`)
+      if (
+        !job ||
+        job.runner !== 'workflow' ||
+        job.cancelRequested ||
+        job.status !== 'pending'
+      )
+        throw new Error('The production job is no longer waiting for a plan.')
+      const node = job.graph[nodeId]
+      if (
+        !Object.hasOwn(job.graph, nodeId) ||
+        node.class_type !== 'HiggsfieldTalkingShot'
+      )
+        throw new Error('Talking-shot node not found.')
+      const shot = talkingShotSchema.parse({ ...node.inputs, scene })
+      job.plannedScenes = { ...job.plannedScenes, [nodeId]: shot.scene }
+      await this.ctx.storage.put(`job:${id}`, job)
+    })
+  }
+
+  async workflowFailed(id: string, error: string) {
+    const job = await this.ctx.storage.get<Job>(`job:${id}`)
+    if (
+      job?.runner === 'workflow' &&
+      ['pending', 'in_progress'].includes(job.status)
+    )
+      await this.finish(job, 'failed', error)
+  }
+
+  async workflowTick(id: string) {
+    if (this.workflowInFlight) {
+      if (this.workflowInFlight.id !== id)
+        throw new Error('Another workflow step is completing.')
+      return this.workflowInFlight.promise
+    }
+    const run = async () => {
+      const job = await this.ctx.storage.get<Job>(`job:${id}`)
+      if (!job || job.runner !== 'workflow')
+        throw new Error('Workflow job not found.')
+      if (
+        ['pending', 'in_progress'].includes(job.status) &&
+        (await this.ctx.storage.get<string>('active')) === id
+      )
+        await this.advance(job)
+      const current = await this.ctx.storage.get<Job>(`job:${id}`)
+      return {
+        done: !current || !['pending', 'in_progress'].includes(current.status),
+        status: current?.status ?? 'failed',
+        delay: current?.workflowDelay ?? 5000
+      }
+    }
+    this.workflowInFlight = { id, promise: run() }
+    try {
+      return await this.workflowInFlight.promise
+    } finally {
+      this.workflowInFlight = undefined
+    }
+  }
+
   async alarm() {
     const id = await this.ctx.storage.get<string>('active')
     const job = id ? await this.ctx.storage.get<Job>(`job:${id}`) : undefined
     if (!job) return
+    if (job.runner !== 'workflow') return this.advance(job)
+    try {
+      try {
+        const instance = await this.env.COMFY_PRODUCTION.get(job.id)
+        const status = await instance.status()
+        if (['errored', 'terminated', 'complete'].includes(status.status))
+          await this.workflowFailed(
+            job.id,
+            'Workflow stopped before the job was finalized. Check provider history before rerunning.'
+          )
+        return
+      } catch {
+        await this.env.COMFY_PRODUCTION.create({
+          id: job.id,
+          params: { jobId: job.id, owner: 'owner' }
+        })
+      }
+    } catch {
+      const current = await this.ctx.storage.get<Job>(`job:${job.id}`)
+      if (
+        !current ||
+        current.status !== 'pending' ||
+        current.submitting ||
+        current.requestId
+      )
+        return
+      job.workflowStarts = (current.workflowStarts ?? 0) + 1
+      if (job.workflowStarts >= 12)
+        await this.workflowFailed(
+          job.id,
+          'Could not start the durable workflow. Check workflow and provider history before rerunning.'
+        )
+      else {
+        await this.save(job)
+        await this.ctx.storage.setAlarm(Date.now() + 5000)
+      }
+    }
+  }
+
+  private async advance(job: Job) {
     if (job.rendering) {
       await this.finish(
         job,
@@ -443,7 +580,7 @@ export class ComfyJobs extends DurableObject<Env> {
             value:
               'Higgsfield could not cancel this request. It may already be processing; tracking continues.'
           })
-          await this.ctx.storage.setAlarm(Date.now() + 5000)
+          await this.schedule(job, 5000)
           return
         }
       }
@@ -455,8 +592,20 @@ export class ComfyJobs extends DurableObject<Env> {
       return
     }
     const nodeId = job.order[job.index]
-    const node = job.graph[nodeId]
+    const originalNode = job.graph[nodeId]
+    const node = job.plannedScenes?.[nodeId]
+      ? {
+          ...originalNode,
+          inputs: { ...originalNode.inputs, scene: job.plannedScenes[nodeId] }
+        }
+      : originalNode
     try {
+      if (
+        node.class_type === 'HiggsfieldTalkingShot' &&
+        node.inputs.planner === 'jev_astra' &&
+        !job.plannedScenes?.[nodeId]
+      )
+        throw new Error('The creative plan is missing; no video was submitted.')
       if (isFinishing(node.class_type)) {
         if (job.index === 0)
           this.broadcast('execution_start', {
@@ -500,7 +649,7 @@ export class ComfyJobs extends DurableObject<Env> {
           )
         else if (job.index >= job.order.length)
           await this.finish(job, 'completed')
-        else await this.ctx.storage.setAlarm(Date.now() + 100)
+        else await this.schedule(job, 100)
         return
       }
       if (!job.requestId) {
@@ -574,14 +723,14 @@ export class ComfyJobs extends DurableObject<Env> {
       job.pollErrors = 0
       job.lastPollError = undefined
       await this.save(job)
-      await this.ctx.storage.setAlarm(Date.now() + 5000)
+      await this.schedule(job, 5000)
     } catch (error) {
       job.pollErrors = (job.pollErrors ?? 0) + 1
       job.lastPollError =
         error instanceof Error ? error.message : 'Provider status unavailable'
       if (job.requestId && job.pollErrors < 12) {
         await this.save(job)
-        await this.ctx.storage.setAlarm(Date.now() + 15000)
+        await this.schedule(job, 15000)
         return
       }
       await this.finish(

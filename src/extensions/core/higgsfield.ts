@@ -113,6 +113,44 @@ app.registerExtension({
         { serialize: false }
       )
     }
+    if (comfyClass === 'HiggsfieldTalkingShot') {
+      node.addWidget(
+        'button',
+        t('higgsfield.previewTalking'),
+        '',
+        async () => {
+          try {
+            const { output } = await app.graphToPrompt()
+            const response = await api.fetchApi('/production/plan', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(output[String(node.id)].inputs)
+            })
+            if (!response.ok) {
+              useToastStore().addAlert(t('higgsfield.planFailed'))
+              return
+            }
+            const result = z
+              .object({
+                payload: z.object({ prompt: z.string() }),
+                limitations: z.array(z.string())
+              })
+              .parse(await response.json())
+            useToastStore().add({
+              severity: 'info',
+              summary: t('higgsfield.planReady'),
+              detail: [result.payload.prompt, ...result.limitations].join(
+                '\n\n'
+              ),
+              life: 30000
+            })
+          } catch {
+            useToastStore().addAlert(t('higgsfield.planFailed'))
+          }
+        },
+        { serialize: false }
+      )
+    }
     if (production) return
     node.addWidget(
       'button',

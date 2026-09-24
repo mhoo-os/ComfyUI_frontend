@@ -73,3 +73,35 @@ remains available under existing user review. Seven focused tests pass, full
 build/typechecks and lint pass (199 upstream warnings), Knip and ADR checks pass.
 Delivery Room update remains pending under the previously recorded unconfirmed
 request; same job, branch, PR and production ownership. No new preview route.
+
+## Talking-shot continuation — 25 September 2026
+
+This supersedes the previous continuation's unimplemented-planner/Workflows
+status. Added HiggsfieldTalkingShot with separate scene/dialogue, duration and
+format fields; free template mode and optional Jev/Astra mode. Strict compilation
+targets verified Seedance 2.5 text-to-video with generate_audio. Exact spoken
+wording, lip sync and identity fidelity remain unverified; no Speech2Video route
+was invented. Native preview request submits no Higgsfield generation.
+
+User supplied default_codex-lb_default and default_typesafe_default. Metadata
+confirmed active AI-Gateway-only secrets in the existing default gateway. Reuse
+custom-codex-lb and custom-typesafe paths with default aliases and existing
+mhoo_workbench_cf_aig_token gateway authentication; no key extraction, new token
+or secret scope changes. Workflows routes/drafts in separate no-retry steps;
+ComfyJobs remains the paid-submission ledger/history owner. Other graphs retain
+the previous alarm runner. Real local Workflows test covers sleep/poll/archive;
+ambiguous-submit regression proves no duplicate paid POST. 38 backend tests pass.
+Live deployment and planner acceptance pending below. No new Higgsfield spend.
+
+Live release: Worker 78cbb0c5-5994-4f6a-bd31-efed70c8680a, Pages
+https://23d30d7c.mhoo-comfy.pages.dev, Workflow mhoo-comfy-production.
+Saved native workflow “Script to Talking Shot”, graph
+58405a58-644f-43a9-83ad-1bdfbef17d3b. Free template preview, native button,
+WebMCP parameter inspection and workflow save verified. Owner session expired;
+reused the existing Google account chooser for tanyawit@mhoooo.com, with no new
+grant. Live planner initially failed because Workers rejects fetch redirect
+mode error; changed to manual (non-2xx redirects fail closed). Live AI planner
+then returned 200: Jev single_speaker confidence 0.84 in 1352ms; Astra scene
+expansion in 5808ms. Dialogue remained literal. No Higgsfield paid submission.
+The new real-Workflows Jev→Astra→provider test covers runtime fetch semantics
+with simulated services. Full-stack paid video acceptance remains outstanding.

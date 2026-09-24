@@ -1,6 +1,6 @@
 {
   "HiggsfieldSoul": {
-    "title": "SOUL V2 · Image",
+    "title": "SOUL V2 \u00b7 Image",
     "endpoint": "higgsfield-ai/soul/v2/standard",
     "kind": "image",
     "source": "https://docs.higgsfield.ai/docs/models/soul-2/generate.md",
@@ -59,7 +59,7 @@
     }
   },
   "HiggsfieldVideo": {
-    "title": "Seedance 2.5 · Video",
+    "title": "Seedance 2.5 \u00b7 Video",
     "endpoint": "bytedance/seedance-2.5/text-to-video",
     "kind": "video",
     "source": "https://docs.higgsfield.ai/docs/models/seedance-2-5/text-to-video.md",
@@ -107,7 +107,7 @@
     }
   },
   "HiggsfieldAnimate": {
-    "title": "Seedance 2.5 · Animate image",
+    "title": "Seedance 2.5 \u00b7 Animate image",
     "endpoint": "bytedance/seedance-2.5/image-to-video",
     "kind": "video",
     "source": "https://docs.higgsfield.ai/docs/models/seedance-2-5/image-to-video.md",
@@ -153,7 +153,7 @@
     }
   },
   "HiggsfieldCampaign": {
-    "title": "Marketing Studio · Reference image",
+    "title": "Marketing Studio \u00b7 Reference image",
     "endpoint": "marketing-studio/image",
     "kind": "image",
     "source": "https://dash.higgsfield.ai/models/marketing-studio/image/llms.txt",
@@ -196,6 +196,47 @@
         }
       },
       "required": ["prompt"]
+    }
+  },
+  "HiggsfieldTalkingShot": {
+    "title": "Script \u2192 Talking Shot \u00b7 Preview",
+    "endpoint": "bytedance/seedance-2.5/text-to-video",
+    "kind": "video",
+    "source": "https://docs.higgsfield.ai/docs/models/seedance-2-5/text-to-video.md",
+    "schema": {
+      "properties": {
+        "scene": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "dialogue": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "duration": {
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 30,
+          "default": 5
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "enum": ["16:9", "9:16", "1:1"],
+          "default": "16:9"
+        },
+        "resolution": {
+          "type": "string",
+          "enum": ["480p", "720p"],
+          "default": "720p"
+        },
+        "planner": {
+          "type": "string",
+          "enum": ["template", "jev_astra"],
+          "default": "template"
+        }
+      },
+      "required": ["scene", "dialogue"],
+      "additionalProperties": false
     }
   }
 }

@@ -1,0 +1,41 @@
+{
+  "last_node_id": 1,
+  "last_link_id": 0,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "HiggsfieldTalkingShot",
+      "title": "Script \u2192 Talking Shot \u00b7 Experimental",
+      "pos": [200, 140],
+      "size": [500, 560],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "video_url",
+          "type": "STRING",
+          "links": [],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "HiggsfieldTalkingShot"
+      },
+      "widgets_values": [
+        "A futuristic street trader in a rain-lit neon market holds a glowing neural chip. Medium close-up, visible face, steady camera.",
+        "Your next big idea starts here.",
+        5,
+        "16:9",
+        "720p",
+        "template"
+      ]
+    }
+  ],
+  "links": [],
+  "groups": [],
+  "config": {},
+  "extra": {},
+  "version": 0.4
+}

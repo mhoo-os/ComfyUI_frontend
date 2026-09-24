@@ -1,6 +1,8 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose'
 import { z } from 'zod'
 
+import { compileTalkingShot, talkingShotSchema } from './talkingShot'
+import { routeShot, expandShot } from './planner'
 import { models, nodeDefinitions } from './graph'
 import { boundedJson, json } from './jobs'
 import { uploadImage } from './media'
@@ -8,6 +10,7 @@ import { uploadProductionMedia } from './rendering'
 import { userData } from './userData'
 
 export { ComfyJobs } from './jobs'
+export { ComfyProduction } from './workflow'
 export { ComfyRenderer } from './rendering'
 
 const base = '/00/comfy'
@@ -52,6 +55,26 @@ export default {
         return uploadImage(request, env)
       if (path === '/production/upload' && request.method === 'POST')
         return uploadProductionMedia(request, env)
+      if (path === '/production/plan' && request.method === 'POST') {
+        const shot = talkingShotSchema.parse(await boundedJson(request))
+        const route =
+          shot.planner === 'jev_astra' ? await routeShot(env, shot) : null
+        const creative = route ? await expandShot(env, shot) : null
+        return json({
+          planner: shot.planner,
+          route,
+          creative,
+          endpoint: models.HiggsfieldTalkingShot.endpoint,
+          payload: compileTalkingShot({
+            ...shot,
+            scene: creative?.scene ?? shot.scene
+          }),
+          limitations: [
+            'Speech wording and lip sync require review; this endpoint does not guarantee either.',
+            'No Higgsfield generation was submitted.'
+          ]
+        })
+      }
       if (path === '/object_info') return json(nodeDefinitions())
       if (path === '/features') return json({})
       if (path === '/users') return json({ storage: 'server', migrated: true })
@@ -168,8 +191,30 @@ export default {
       response.headers.set('x-content-type-options', 'nosniff')
       response.headers.set('referrer-policy', 'strict-origin-when-cross-origin')
       return response
-    } catch {
-      return json({ error: 'Request failed. Check the input and retry.' }, 400)
+    } catch (error) {
+      const message =
+        error instanceof z.ZodError
+          ? 'Planner response did not match the required schema.'
+          : error instanceof Error
+            ? error.message
+            : ''
+      const plannerError = new URL(request.url).pathname.endsWith(
+        '/production/plan'
+      )
+      return json(
+        {
+          error:
+            plannerError &&
+            /^(typesafe planner|codex-lb planner|Planner response|Planner gateway authentication is unavailable|This draft needs review|Astra declined)/.test(
+              message
+            )
+              ? message
+              : plannerError
+                ? `Planner failed (${error instanceof Error ? error.name : 'unknown'}).`
+                : 'Request failed. Check the input and retry.'
+        },
+        400
+      )
     }
   }
 } satisfies ExportedHandler<Env>

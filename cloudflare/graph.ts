@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 import type { EditValue } from './finishing'
 import catalog from './models.json'
+import { compileTalkingShot } from './talkingShot'
 import {
   finishingNodeDefinitions,
   isFinishing,
@@ -76,7 +77,9 @@ export function nodeDefinitions() {
                   default: prop.default ?? (key === 'seed' ? 1 : ''),
                   ...(prop.minimum !== undefined && { min: prop.minimum }),
                   ...(prop.maximum !== undefined && { max: prop.maximum }),
-                  ...(key === 'prompt' && { multiline: true }),
+                  ...(['prompt', 'scene', 'dialogue'].includes(key) && {
+                    multiline: true
+                  }),
                   ...(key === 'seed' && { control_after_generate: true })
                 }
               ]
@@ -88,7 +91,10 @@ export function nodeDefinitions() {
           {
             name,
             display_name: model.title,
-            description: `Higgsfield API · ${model.endpoint}. Run submits a paid generation. URL output connects to another Higgsfield node.`,
+            description:
+              name === 'HiggsfieldTalkingShot'
+                ? 'Scene + spoken words → generated video with audio. Template or Jev + Astra planner; exact wording, lip sync and identity are best-effort and require review. Run spends Higgsfield credits.'
+                : `Higgsfield API · ${model.endpoint}. Run submits a paid generation. URL output connects to another Higgsfield node.`,
             category: 'Higgsfield',
             python_module: 'mhoo.higgsfield',
             input: { required },
@@ -235,5 +241,7 @@ export function resolveInputs(
     }
     input[prop.providerField ?? key] = prop.asArray ? [String(value)] : value
   }
-  return input
+  return node.class_type === 'HiggsfieldTalkingShot'
+    ? compileTalkingShot(input)
+    : input
 }

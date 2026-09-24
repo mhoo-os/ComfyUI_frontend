@@ -1,6 +1,6 @@
 # Agent-controlled production: validated architecture
 
-Validated 2026-09-24. First requested workflow: **Script-to-Talking Shot**.
+Updated 2026-09-25. First requested workflow: **Script-to-Talking Shot**.
 This is the acceptance target, not a claim that the complete stack is deployed.
 
 ## Boundaries
@@ -11,10 +11,10 @@ Jev suggests semantic routes; deterministic code owns capability, authorization,
 budget and payload validation. Astra writes creative plans, not arbitrary HTTP
 requests. FFmpeg finishing remains a Cloudflare Container.
 
-The current runner is ComfyJobs Durable Object alarms. Workflows is the selected
-future orchestration boundary, not a second concurrently active runner. Migrate
-new jobs only after resumability and duplicate-submission tests pass; preserve
-existing history and owner protection.
+Graphs containing HiggsfieldTalkingShot use Cloudflare Workflows for planning
+and durable execution ticks. ComfyJobs retains the owner queue, submission ledger,
+cancellation state and native history. Other graphs retain Durable Object alarms.
+Each job persists its runner; alarms only launch Workflows for talking-shot jobs.
 
 ## Implemented browser tools
 
@@ -50,9 +50,14 @@ lip-sync stage that might require only a still.
 9. Verify spoken words, audible speech, lip alignment and character consistency
    manually. A successful HTTP response does not prove those quality criteria.
 
-Not yet implemented: script/planner canvas nodes, Jev/Astra bindings, Workflows
-migration, verified exact-dialogue speech synthesis/lip-sync route and paid
-video acceptance. Built-in ChatGPT image generation is available in this
+Implemented: a scene/dialogue canvas node, template or Jev/Astra planning, and
+Workflows execution for this node. The existing default AI Gateway uses the
+user-selected codex-lb and typesafe BYOK aliases. No provider key is exposed to
+the Worker or browser; the Worker uses existing gateway authentication.
+Live planner compatibility passed through the existing gateway: Jev 1.352s,
+Astra 5.808s on one sample (not a latency guarantee). Still unverified:
+exact-dialogue/lip-sync fidelity and paid video acceptance. The selected Seedance text-to-video route generates
+audio from prompt instructions; it is labeled experimental. Built-in ChatGPT image generation is available in this
 conversation, not as an API credential inside the app. No new provider spending
 was authorized by the user's selection of that image generator.
 
@@ -96,7 +101,7 @@ exactly-once guarantee for external side effects.
   sub-100ms is not an app acceptance guarantee.
 - gpt-6-astra supports image/text input and structured text output. Tool use
   requires Responses API. Its large context is optional; use a compact shot
-  brief/story bible. Account availability still requires verification.
+  brief/story bible. Live gateway access to gpt-6-astra was verified on one planner-only request.
 
 ## Cloudflare costs and durability
 

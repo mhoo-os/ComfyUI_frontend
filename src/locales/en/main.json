@@ -5408,6 +5408,9 @@
     "ready": "Ready · Generation uses Higgsfield credits; export uses Cloudflare compute",
     "running": "Workflow · {status} · Step {step}/{total}",
     "statusUnavailable": "Workflow · Status unavailable; reconnecting",
-    "estimatedPrice": "Estimated ${usd} USD · {credits} credits. Actual charges may vary."
+    "estimatedPrice": "Estimated ${usd} USD · {credits} credits. Actual charges may vary.",
+    "previewTalking": "Preview request · AI mode uses planner tokens",
+    "planReady": "Talking-shot request · no video submitted",
+    "planFailed": "Could not prepare this shot. Check the scene, dialogue length and planner availability."
   }
 }

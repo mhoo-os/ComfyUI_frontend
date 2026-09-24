@@ -2,7 +2,7 @@ import { build } from 'esbuild'
 import { z } from 'zod'
 import type { Request as MiniflareRequest } from 'miniflare'
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare'
-import { beforeAll, describe, expect, it, onTestFinished } from 'vitest'
+import { beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest'
 
 let script: string
 beforeAll(async () => {
@@ -32,10 +32,20 @@ async function runtime(
       compatibilityDate: '2026-09-24',
       compatibilityFlags: ['nodejs_compat'],
       kvNamespaces: ['COMFY_STATE'],
+      bindings: {
+        PLANNER_GATEWAY_URL:
+          'https://gateway.ai.cloudflare.com/v1/faca04363f6ba617faedaae7d3493769/default'
+      },
       r2Buckets: ['COMFY_MEDIA'],
       durableObjects: {
         COMFY_JOBS: { className: 'TestJobs', useSQLite: true },
         COMFY_RENDERER: { className: 'TestRenderer', useSQLite: true }
+      },
+      workflows: {
+        COMFY_PRODUCTION: {
+          name: 'test-production',
+          className: 'ComfyProduction'
+        }
       },
       outboundService: async (request) =>
         new URL(request.url).hostname === 'cdn.example.com'
@@ -391,3 +401,168 @@ describe('Production finishing', () => {
     expect(await result.text()).toBe('finished')
   })
 })
+
+it('runs a talking shot through real Workflows and archives its video without repeat submission', async () => {
+  let submissions = 0
+  let polls = 0
+  const mf = await runtime(
+    async (request) => {
+      const path = new URL(request.url).pathname
+      if (path === '/bytedance/seedance-2.5/text-to-video') {
+        submissions++
+        const payload = await request.json()
+        expect(payload).toMatchObject({ generate_audio: true, duration: 5 })
+        expect(payload).not.toHaveProperty('dialogue')
+        return Response.json({ request_id: requestId, status: 'queued' })
+      }
+      polls++
+      if (polls === 1)
+        return Response.json({ request_id: requestId, status: 'in_progress' })
+      return Response.json({
+        request_id: requestId,
+        status: 'completed',
+        video: { url: 'https://cdn.example.com/shot.mp4' }
+      })
+    },
+    async () =>
+      new Response('video-bytes', {
+        headers: { 'content-type': 'video/mp4', 'content-length': '11' }
+      })
+  )
+  const { prompt_id } = await queue(mf, {
+    '1': {
+      class_type: 'HiggsfieldTalkingShot',
+      inputs: {
+        scene: 'A trader holds a chip.',
+        dialogue: 'Your next idea starts here.',
+        duration: 5
+      }
+    }
+  })
+  await tick(mf)
+  await vi.waitFor(
+    async () => {
+      const response = await mf.dispatchFetch(`https://test/jobs/${prompt_id}`)
+      expect(await response.json()).toMatchObject({
+        status: 'completed',
+        runner: 'workflow'
+      })
+    },
+    { timeout: 15000, interval: 100 }
+  )
+  expect(submissions).toBe(1)
+  expect(polls).toBe(2)
+  const media = await mf.dispatchFetch(
+    `https://test/view?filename=${prompt_id}/1/0.mp4`
+  )
+  expect(media.status).toBe(200)
+  expect(await media.text()).toBe('video-bytes')
+}, 20000)
+
+it('does not retry an ambiguous paid talking-shot submission in Workflows', async () => {
+  let submissions = 0
+  const mf = await runtime(async () => {
+    submissions++
+    return new Response('upstream response lost', { status: 502 })
+  })
+  const { prompt_id } = await queue(mf, {
+    '1': {
+      class_type: 'HiggsfieldTalkingShot',
+      inputs: {
+        scene: 'A trader holds a chip.',
+        dialogue: 'Your next idea starts here.'
+      }
+    }
+  })
+  await tick(mf)
+  await vi.waitFor(
+    async () => {
+      const response = await mf.dispatchFetch(`https://test/jobs/${prompt_id}`)
+      expect(await response.json()).toMatchObject({
+        status: 'failed',
+        runner: 'workflow'
+      })
+    },
+    { timeout: 15000, interval: 100 }
+  )
+  await tick(mf)
+  expect(submissions).toBe(1)
+}, 20000)
+
+it('checkpoints Jev and Astra before one video submission in real Workflows', async () => {
+  const calls: string[] = []
+  const mf = await runtime(
+    async (request) => {
+      const path = new URL(request.url).pathname
+      calls.push(path)
+      if (path.endsWith('/systemone'))
+        return Response.json({
+          answers: {
+            route: {
+              type: 'choice',
+              choice: 'single_speaker',
+              confidence: 0.95
+            }
+          }
+        })
+      if (path.endsWith('/responses'))
+        return Response.json({
+          status: 'completed',
+          output: [
+            {
+              type: 'message',
+              content: [
+                {
+                  type: 'output_text',
+                  text: '{"scene":"A steady close-up of the trader in amber neon."}'
+                }
+              ]
+            }
+          ]
+        })
+      if (path.endsWith('/text-to-video')) {
+        const payload = await request.json()
+        expect(payload).toMatchObject({
+          prompt: expect.stringContaining('amber neon')
+        })
+        expect(payload).toMatchObject({
+          prompt: expect.stringContaining('Your next idea starts here.')
+        })
+        return Response.json({ request_id: requestId, status: 'queued' })
+      }
+      return Response.json({
+        request_id: requestId,
+        status: 'completed',
+        video: { url: 'https://cdn.example.com/shot.mp4' }
+      })
+    },
+    async () =>
+      new Response('video-bytes', {
+        headers: { 'content-type': 'video/mp4', 'content-length': '11' }
+      })
+  )
+  const { prompt_id } = await queue(mf, {
+    '1': {
+      class_type: 'HiggsfieldTalkingShot',
+      inputs: {
+        scene: 'A trader holds a chip.',
+        dialogue: 'Your next idea starts here.',
+        planner: 'jev_astra'
+      }
+    }
+  })
+  await tick(mf)
+  await vi.waitFor(
+    async () => {
+      const response = await mf.dispatchFetch(`https://test/jobs/${prompt_id}`)
+      expect(await response.json()).toMatchObject({ status: 'completed' })
+    },
+    { timeout: 15000, interval: 100 }
+  )
+  expect(calls.map((path) => path.split('/').at(-1))).toEqual([
+    'systemone',
+    'responses',
+    'text-to-video',
+    'status'
+  ])
+}, 20000)
