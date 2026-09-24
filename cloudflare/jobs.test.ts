@@ -1,4 +1,5 @@
 import { build } from 'esbuild'
+import { z } from 'zod'
 import type { Request as MiniflareRequest } from 'miniflare'
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare'
 import { beforeAll, describe, expect, it, onTestFinished } from 'vitest'
@@ -33,7 +34,8 @@ async function runtime(
       kvNamespaces: ['COMFY_STATE'],
       r2Buckets: ['COMFY_MEDIA'],
       durableObjects: {
-        COMFY_JOBS: { className: 'TestJobs', useSQLite: true }
+        COMFY_JOBS: { className: 'TestJobs', useSQLite: true },
+        COMFY_RENDERER: { className: 'TestRenderer', useSQLite: true }
       },
       outboundService: async (request) =>
         new URL(request.url).hostname === 'cdn.example.com'
@@ -318,5 +320,74 @@ describe('Reference pipeline and storage', () => {
     )
     expect(video.headers.get('content-type')).toBe('video/mp4')
     expect(await video.text()).toBe('media-bytes')
+  })
+})
+
+describe('Production finishing', () => {
+  it('rejects a production upload whose declared length is smaller than its body', async () => {
+    const mf = await runtime(async () => {
+      throw new Error('No provider call expected')
+    })
+    const response = await mf.dispatchFetch('https://test/test/short-upload', {
+      method: 'POST',
+      headers: { 'content-type': 'video/mp4' },
+      body: 'too-large'
+    })
+    expect(response.status).toBeGreaterThanOrEqual(400)
+    expect(
+      (await (await mf.getR2Bucket('COMFY_MEDIA')).list()).objects
+    ).toHaveLength(0)
+  })
+
+  it('renders private uploaded clips and keeps the finished MP4 playable without submitting to Higgsfield', async () => {
+    const mf = await runtime(async (request) => {
+      expect(new URL(request.url).hostname).toBe('renderer.example.com')
+      const form = await request.formData()
+      expect(JSON.parse(String(form.get('manifest')))).toMatchObject({
+        width: 1280,
+        height: 720,
+        clips: [{ start: 0.5, duration: 2 }],
+        caption: 'Coffee time',
+        originalVolume: 1
+      })
+      const clip = form.get('clip0')
+      expect(
+        typeof clip === 'object' && clip !== null && (await clip.text())
+      ).toBe('test-video')
+      return new Response('finished-mp4', {
+        headers: { 'content-type': 'video/mp4', 'content-length': '12' }
+      })
+    })
+    const upload = await mf.dispatchFetch('https://test/production/upload', {
+      method: 'POST',
+      headers: { 'content-type': 'video/mp4', 'content-length': '10' },
+      body: 'test-video'
+    })
+    const asset = z.object({ url: z.string() }).parse(await upload.json())
+    const job = await queue(mf, {
+      '1': {
+        class_type: 'MhooClip',
+        inputs: { video_url: asset.url, start: 0.5, duration: 2 }
+      },
+      '2': {
+        class_type: 'MhooSequence',
+        inputs: { clip_1: ['1', 0], transition: 'cut' }
+      },
+      '3': {
+        class_type: 'MhooCompose',
+        inputs: { sequence: ['2', 0], caption: 'Coffee time' }
+      },
+      '4': { class_type: 'MhooExport', inputs: { edit: ['3', 0] } }
+    })
+    for (let i = 0; i < 4; i++) await tick(mf)
+    expect(await jobs(mf)).toMatchObject({
+      jobs: [{ status: 'completed', outputs_count: 1 }]
+    })
+    const result = await mf.dispatchFetch(
+      `https://test/view?filename=${job.prompt_id}/4/0.mp4`,
+      { headers: { Range: 'bytes=0-7' } }
+    )
+    expect(result.status).toBe(206)
+    expect(await result.text()).toBe('finished')
   })
 })

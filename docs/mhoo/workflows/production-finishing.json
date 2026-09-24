@@ -1,0 +1,189 @@
+{
+  "last_node_id": 5,
+  "last_link_id": 4,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "MhooClip",
+      "title": "01 \u00b7 Opening shot",
+      "pos": [40, 80],
+      "size": [300, 240],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "clip",
+          "type": "COMFY_CLIP",
+          "links": [1],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "MhooClip"
+      },
+      "widgets_values": ["", 0, 3]
+    },
+    {
+      "id": 2,
+      "type": "MhooClip",
+      "title": "02 \u00b7 Closing shot",
+      "pos": [40, 380],
+      "size": [300, 240],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "clip",
+          "type": "COMFY_CLIP",
+          "links": [2],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "MhooClip"
+      },
+      "widgets_values": ["", 3, 3]
+    },
+    {
+      "id": 3,
+      "type": "MhooSequence",
+      "title": "03 \u00b7 Order & transition",
+      "pos": [390, 180],
+      "size": [300, 240],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip_1",
+          "type": "COMFY_CLIP",
+          "link": 1
+        },
+        {
+          "name": "clip_2",
+          "type": "COMFY_CLIP",
+          "link": 2
+        },
+        {
+          "name": "clip_3",
+          "type": "COMFY_CLIP",
+          "link": null
+        },
+        {
+          "name": "clip_4",
+          "type": "COMFY_CLIP",
+          "link": null
+        },
+        {
+          "name": "clip_5",
+          "type": "COMFY_CLIP",
+          "link": null
+        },
+        {
+          "name": "clip_6",
+          "type": "COMFY_CLIP",
+          "link": null
+        },
+        {
+          "name": "clip_7",
+          "type": "COMFY_CLIP",
+          "link": null
+        },
+        {
+          "name": "clip_8",
+          "type": "COMFY_CLIP",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "sequence",
+          "type": "COMFY_SEQUENCE",
+          "links": [3],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "MhooSequence"
+      },
+      "widgets_values": ["fade"]
+    },
+    {
+      "id": 4,
+      "type": "MhooCompose",
+      "title": "04 \u00b7 Brand & soundtrack",
+      "pos": [740, 180],
+      "size": [300, 240],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "sequence",
+          "type": "COMFY_SEQUENCE",
+          "link": 3
+        }
+      ],
+      "outputs": [
+        {
+          "name": "edit",
+          "type": "COMFY_EDIT",
+          "links": [4],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "MhooCompose"
+      },
+      "widgets_values": ["A moment, brewed slowly.", "", "", 1, 0.25]
+    },
+    {
+      "id": 5,
+      "type": "MhooExport",
+      "title": "05 \u00b7 Finished MP4",
+      "pos": [1090, 180],
+      "size": [300, 240],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "edit",
+          "type": "COMFY_EDIT",
+          "link": 4
+        }
+      ],
+      "outputs": [
+        {
+          "name": "string",
+          "type": "STRING",
+          "links": [],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "MhooExport"
+      },
+      "widgets_values": ["16:9", "720p"]
+    }
+  ],
+  "links": [
+    [1, 1, 0, 3, 0, "COMFY_CLIP"],
+    [2, 2, 0, 3, 1, "COMFY_CLIP"],
+    [3, 3, 0, 4, 0, "COMFY_SEQUENCE"],
+    [4, 4, 0, 5, 0, "COMFY_EDIT"]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.75,
+      "offset": [20, 20]
+    }
+  },
+  "version": 0.4
+}

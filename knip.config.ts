@@ -9,6 +9,7 @@ const config: KnipConfig = {
         '{build,scripts}/**/*.{js,ts}',
         'vitest.matrix.config.mts',
         'cloudflare/worker.ts',
+        'cloudflare/renderer/server.ts',
         'cloudflare/testing/harness.ts',
         'src/assets/css/style.css',
         'src/scripts/ui/menu/index.ts',

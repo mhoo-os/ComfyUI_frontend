@@ -4,9 +4,11 @@ import { z } from 'zod'
 import { models, nodeDefinitions } from './graph'
 import { boundedJson, json } from './jobs'
 import { uploadImage } from './media'
+import { uploadProductionMedia } from './rendering'
 import { userData } from './userData'
 
 export { ComfyJobs } from './jobs'
+export { ComfyRenderer } from './rendering'
 
 const base = '/00/comfy'
 const keys = createRemoteJWKSet(
@@ -48,6 +50,8 @@ export default {
       const path = relative.replace(/^\/api(?=\/|$)/, '')
       if (path === '/higgsfield/upload' && request.method === 'POST')
         return uploadImage(request, env)
+      if (path === '/production/upload' && request.method === 'POST')
+        return uploadProductionMedia(request, env)
       if (path === '/object_info') return json(nodeDefinitions())
       if (path === '/features') return json({})
       if (path === '/users') return json({ storage: 'server', migrated: true })
@@ -60,7 +64,7 @@ export default {
             endpoint: model.endpoint,
             source: model.source
           })),
-          max_nodes: 8,
+          max_nodes: 32,
           max_concurrent_workflows: 1
         })
       if (path.startsWith('/userdata')) return userData(request, env, path, url)

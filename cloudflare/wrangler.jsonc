@@ -37,6 +37,10 @@
       {
         "name": "COMFY_JOBS",
         "class_name": "ComfyJobs"
+      },
+      {
+        "name": "COMFY_RENDERER",
+        "class_name": "ComfyRenderer"
       }
     ]
   },
@@ -44,6 +48,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["ComfyJobs"]
+    },
+    {
+      "tag": "v2-renderer",
+      "new_sqlite_classes": ["ComfyRenderer"]
     }
   ],
   "observability": {
@@ -54,6 +62,14 @@
     {
       "binding": "COMFY_MEDIA",
       "bucket_name": "mhoo-comfy-media"
+    }
+  ],
+  "containers": [
+    {
+      "class_name": "ComfyRenderer",
+      "image": "./renderer/Dockerfile",
+      "instance_type": "standard-2",
+      "max_instances": 1
     }
   ]
 }

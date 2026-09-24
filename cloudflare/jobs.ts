@@ -1,6 +1,9 @@
 import { DurableObject } from 'cloudflare:workers'
 import { z } from 'zod'
 
+import { isFinishing, resolveFinishing, renderPlanSchema } from './finishing'
+import type { EditValue } from './finishing'
+import { renderVideo } from './rendering'
 import { models, planGraph, resolveInputs } from './graph'
 import type { Graph, Media } from './graph'
 import { archiveMedia, readMedia } from './media'
@@ -24,6 +27,8 @@ type Job = {
   updated: number
   index: number
   outputs: Record<string, Media[]>
+  edits?: Record<string, EditValue>
+  rendering?: boolean
   requestId?: string
   providerRequests?: Record<string, string>
   submitting?: boolean
@@ -269,6 +274,12 @@ export class ComfyJobs extends DurableObject<Env> {
         if (order.length !== 1)
           return json({ error: 'Estimate one node at a time.' }, 400)
         const node = graph[order[0]]
+        if (isFinishing(node.class_type))
+          return json({
+            type: 'description',
+            pricing_description:
+              'Uses Cloudflare rendering compute, not Higgsfield credits.'
+          })
         return json(
           await provider(
             this.env,
@@ -315,7 +326,7 @@ export class ComfyJobs extends DurableObject<Env> {
           assets: Object.entries(job.outputs).flatMap(([node, media]) =>
             media.map((item, i) => ({
               id: `${id}/${node}/${i}`,
-              name: `${models[job.graph[node].class_type].title} ${i + 1}`,
+              name: `${isFinishing(job.graph[node].class_type) ? 'Finished video' : models[job.graph[node].class_type].title} ${i + 1}`,
               preview_url: item.storageKey
                 ? `/00/comfy/api/view?filename=${id}/${node}/${i}`
                 : item.url,
@@ -397,6 +408,14 @@ export class ComfyJobs extends DurableObject<Env> {
     const id = await this.ctx.storage.get<string>('active')
     const job = id ? await this.ctx.storage.get<Job>(`job:${id}`) : undefined
     if (!job) return
+    if (job.rendering) {
+      await this.finish(
+        job,
+        'failed',
+        'Render was interrupted. Completed generation outputs remain in history; rerun a finishing-only workflow to avoid generating again.'
+      )
+      return
+    }
     if (job.submitting) {
       await this.finish(
         job,
@@ -438,6 +457,52 @@ export class ComfyJobs extends DurableObject<Env> {
     const nodeId = job.order[job.index]
     const node = job.graph[nodeId]
     try {
+      if (isFinishing(node.class_type)) {
+        if (job.index === 0)
+          this.broadcast('execution_start', {
+            prompt_id: job.id,
+            timestamp: Date.now()
+          })
+        job.status = 'in_progress'
+        job.providerStatus =
+          node.class_type === 'MhooExport' ? 'rendering' : 'preparing edit'
+        this.broadcast('executing', { node: nodeId, prompt_id: job.id })
+        const value = resolveFinishing(node, job.edits ?? {}, job.outputs)
+        if (node.class_type === 'MhooExport') {
+          job.rendering = true
+          await this.save(job)
+          job.outputs[nodeId] = [
+            await renderVideo(
+              this.env,
+              renderPlanSchema.parse(value),
+              `outputs/${job.id}/${nodeId}/0`
+            )
+          ]
+          job.rendering = false
+        } else {
+          job.edits = { ...job.edits, [nodeId]: value }
+        }
+        this.broadcast('executed', {
+          node: nodeId,
+          display_node: nodeId,
+          prompt_id: job.id,
+          output: outputFor(job, nodeId)
+        })
+        job.index++
+        job.providerStatus = undefined
+        await this.save(job)
+        const current = await this.ctx.storage.get<Job>(`job:${job.id}`)
+        if (current?.cancelRequested)
+          await this.finish(
+            job,
+            'cancelled',
+            'Workflow cancelled. Completed outputs remain in history.'
+          )
+        else if (job.index >= job.order.length)
+          await this.finish(job, 'completed')
+        else await this.ctx.storage.setAlarm(Date.now() + 100)
+        return
+      }
       if (!job.requestId) {
         if (job.index === 0)
           this.broadcast('execution_start', {

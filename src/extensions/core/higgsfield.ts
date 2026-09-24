@@ -5,7 +5,7 @@ import { useToastStore } from '@/platform/updates/common/toastStore'
 import { api } from '@/scripts/api'
 import { app } from '@/scripts/app'
 
-const uploadResult = z.object({ url: z.string().url() })
+const uploadResult = z.object({ url: z.string().min(1) })
 const estimateResult = z.union([
   z.object({
     type: z.literal('estimate'),
@@ -24,10 +24,20 @@ app.registerExtension({
   },
   nodeCreated(node) {
     const comfyClass: unknown = node.constructor.comfyClass
-    if (typeof comfyClass !== 'string' || !comfyClass.startsWith('Higgsfield'))
-      return
+    if (typeof comfyClass !== 'string') return
+    const production = comfyClass.startsWith('Mhoo')
+    if (!production && !comfyClass.startsWith('Higgsfield')) return
     for (const widget of node.widgets ?? []) {
-      if (!['image_url', 'end_image_url'].includes(widget.name)) continue
+      if (
+        ![
+          'image_url',
+          'end_image_url',
+          'video_url',
+          'music_url',
+          'logo_url'
+        ].includes(widget.name)
+      )
+        continue
       node.addWidget(
         'button',
         t('higgsfield.upload', { input: widget.name }),
@@ -35,22 +45,42 @@ app.registerExtension({
         () => {
           const input = document.createElement('input')
           input.type = 'file'
-          input.accept = 'image/jpeg,image/png,image/webp,image/gif'
+          input.accept =
+            widget.name === 'video_url'
+              ? 'video/mp4,video/webm'
+              : widget.name === 'music_url'
+                ? 'audio/mpeg,audio/wav,audio/x-wav,audio/mp4'
+                : 'image/jpeg,image/png,image/webp,image/gif'
           input.onchange = async () => {
             const file = input.files?.[0]
             if (!file) return
             try {
-              if (file.size > 20 * 1024 * 1024) {
-                useToastStore().addAlert(t('higgsfield.tooLarge'))
+              if (file.size > (production ? 80 : 20) * 1024 * 1024) {
+                useToastStore().addAlert(
+                  t(
+                    production
+                      ? 'higgsfield.productionTooLarge'
+                      : 'higgsfield.tooLarge'
+                  )
+                )
                 return
               }
-              const response = await api.fetchApi('/higgsfield/upload', {
-                method: 'POST',
-                headers: { 'Content-Type': file.type },
-                body: file
-              })
+              const response = await api.fetchApi(
+                production ? '/production/upload' : '/higgsfield/upload',
+                {
+                  method: 'POST',
+                  headers: { 'Content-Type': file.type },
+                  body: file
+                }
+              )
               if (!response.ok) {
-                useToastStore().addAlert(t('higgsfield.uploadFailed'))
+                useToastStore().addAlert(
+                  t(
+                    production
+                      ? 'higgsfield.productionUploadFailed'
+                      : 'higgsfield.uploadFailed'
+                  )
+                )
                 return
               }
               const result = uploadResult.parse(await response.json())
@@ -59,14 +89,22 @@ app.registerExtension({
               node.setDirtyCanvas(true, true)
               useToastStore().add({
                 severity: 'success',
-                summary: t('higgsfield.uploaded'),
+                summary: t(
+                  production
+                    ? 'higgsfield.productionUploaded'
+                    : 'higgsfield.uploaded'
+                ),
                 life: 4000
               })
             } catch (error) {
               useToastStore().addAlert(
                 error instanceof Error
                   ? error.message
-                  : t('higgsfield.uploadFailed')
+                  : t(
+                      production
+                        ? 'higgsfield.productionUploadFailed'
+                        : 'higgsfield.uploadFailed'
+                    )
               )
             }
           }
@@ -75,6 +113,7 @@ app.registerExtension({
         { serialize: false }
       )
     }
+    if (production) return
     node.addWidget(
       'button',
       t('higgsfield.estimate'),

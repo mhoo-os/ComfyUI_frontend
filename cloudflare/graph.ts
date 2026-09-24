@@ -1,6 +1,13 @@
 import { z } from 'zod'
 
+import type { EditValue } from './finishing'
 import catalog from './models.json'
+import {
+  finishingNodeDefinitions,
+  isFinishing,
+  resolveFinishing,
+  validateFinishing
+} from './finishing'
 
 const propertySchema = z.object({
   type: z.string(),
@@ -46,58 +53,61 @@ export type Media = {
 }
 
 export function nodeDefinitions() {
-  return Object.fromEntries(
-    Object.entries(models).map(([name, model]) => {
-      const required = Object.fromEntries(
-        Object.entries(model.schema.properties).map(([key, prop]) => {
-          const type =
-            prop.enum ??
-            {
-              string: 'STRING',
-              integer: 'INT',
-              number: 'FLOAT',
-              boolean: 'BOOLEAN'
-            }[prop.type] ??
-            'STRING'
-          return [
-            key,
-            [
-              type,
+  return {
+    ...finishingNodeDefinitions(),
+    ...Object.fromEntries(
+      Object.entries(models).map(([name, model]) => {
+        const required = Object.fromEntries(
+          Object.entries(model.schema.properties).map(([key, prop]) => {
+            const type =
+              prop.enum ??
               {
-                default: prop.default ?? (key === 'seed' ? 1 : ''),
-                ...(prop.minimum !== undefined && { min: prop.minimum }),
-                ...(prop.maximum !== undefined && { max: prop.maximum }),
-                ...(key === 'prompt' && { multiline: true }),
-                ...(key === 'seed' && { control_after_generate: true })
-              }
+                string: 'STRING',
+                integer: 'INT',
+                number: 'FLOAT',
+                boolean: 'BOOLEAN'
+              }[prop.type] ??
+              'STRING'
+            return [
+              key,
+              [
+                type,
+                {
+                  default: prop.default ?? (key === 'seed' ? 1 : ''),
+                  ...(prop.minimum !== undefined && { min: prop.minimum }),
+                  ...(prop.maximum !== undefined && { max: prop.maximum }),
+                  ...(key === 'prompt' && { multiline: true }),
+                  ...(key === 'seed' && { control_after_generate: true })
+                }
+              ]
             ]
-          ]
-        })
-      )
-      return [
-        name,
-        {
+          })
+        )
+        return [
           name,
-          display_name: model.title,
-          description: `Higgsfield API · ${model.endpoint}. Run submits a paid generation. URL output connects to another Higgsfield node.`,
-          category: 'Higgsfield',
-          python_module: 'mhoo.higgsfield',
-          input: { required },
-          output: ['STRING'],
-          output_name: [model.kind === 'image' ? 'image_url' : 'video_url'],
-          output_is_list: [false],
-          output_node: true
-        }
-      ]
-    })
-  )
+          {
+            name,
+            display_name: model.title,
+            description: `Higgsfield API · ${model.endpoint}. Run submits a paid generation. URL output connects to another Higgsfield node.`,
+            category: 'Higgsfield',
+            python_module: 'mhoo.higgsfield',
+            input: { required },
+            output: ['STRING'],
+            output_name: [model.kind === 'image' ? 'image_url' : 'video_url'],
+            output_is_list: [false],
+            output_node: true
+          }
+        ]
+      })
+    )
+  }
 }
 
 export function planGraph(value: unknown): { graph: Graph; order: string[] } {
   const graph = graphSchema.parse(value)
   const ids = Object.keys(graph)
-  if (!ids.length || ids.length > 8)
-    throw new Error('Use between one and eight Higgsfield nodes per workflow.')
+  if (!ids.length || ids.length > 32)
+    throw new Error('Use between one and 32 nodes per workflow.')
   const visiting = new Set<string>()
   const visited = new Set<string>()
   const order: string[] = []
@@ -107,9 +117,19 @@ export function planGraph(value: unknown): { graph: Graph; order: string[] } {
     if (!Object.hasOwn(graph, id))
       throw new Error(`Missing connected node: ${id}`)
     const node = graph[id]
+    if (isFinishing(node.class_type)) {
+      visiting.add(id)
+      validateFinishing(node, graph)
+      for (const value of Object.values(node.inputs))
+        if (Array.isArray(value)) visit(value[0])
+      visiting.delete(id)
+      visited.add(id)
+      order.push(id)
+      return
+    }
     if (!Object.hasOwn(models, node.class_type))
       throw new Error(
-        `Unsupported node: ${node.class_type}. This deployment runs Higgsfield nodes only.`
+        `Unsupported node: ${node.class_type}. Use Higgsfield or Production nodes.`
       )
     visiting.add(id)
     for (const [key, value] of Object.entries(node.inputs)) {
@@ -123,7 +143,7 @@ export function planGraph(value: unknown): { graph: Graph; order: string[] } {
         visit(value[0])
         if (
           key.endsWith('image_url') &&
-          models[graph[value[0]].class_type].kind !== 'image'
+          models[graph[value[0]].class_type]?.kind !== 'image'
         )
           throw new Error('Image input requires an image output.')
       }
@@ -142,6 +162,22 @@ export function planGraph(value: unknown): { graph: Graph; order: string[] } {
     order.push(id)
   }
   ids.forEach(visit)
+  const edits: Record<string, EditValue> = {}
+  const placeholders: Record<string, Media[]> = Object.fromEntries(
+    ids.map((id) => [
+      id,
+      [
+        {
+          url: 'https://example.com/video.mp4',
+          kind: 'video',
+          storageKey: 'uploads/00000000-0000-0000-0000-000000000000'
+        }
+      ]
+    ])
+  )
+  for (const id of order)
+    if (isFinishing(graph[id].class_type))
+      edits[id] = resolveFinishing(graph[id], edits, placeholders)
   return { graph, order }
 }
 

@@ -1,0 +1,9 @@
+{
+  "name": "comfy-renderer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.ts",
+    "test": "node --test smoke.test.ts"
+  }
+}

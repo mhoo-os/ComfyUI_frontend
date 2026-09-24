@@ -26,7 +26,7 @@ describe('Higgsfield workflow boundary', () => {
     })
   })
   it.for([
-    [{}, 'between one and eight'],
+    [{}, 'between one and 32'],
     [{ '1': { class_type: 'KSampler', inputs: {} } }, 'Unsupported node'],
     [{ '1': { ...image, inputs: { prompt: '' } } }, 'prompt is required'],
     [
@@ -83,4 +83,31 @@ describe('Higgsfield workflow boundary', () => {
       }).success
     ).toBe(false)
   })
+})
+
+it('rejects oversized connected timelines before generation can start', () => {
+  const graph: Record<string, unknown> = {
+    source: { class_type: 'HiggsfieldVideo', inputs: { prompt: 'Coffee' } },
+    sequence: {
+      class_type: 'MhooSequence',
+      inputs: {
+        clip_1: ['c1', 0],
+        clip_2: ['c2', 0],
+        clip_3: ['c3', 0],
+        clip_4: ['c4', 0],
+        clip_5: ['c5', 0]
+      }
+    },
+    compose: {
+      class_type: 'MhooCompose',
+      inputs: { sequence: ['sequence', 0] }
+    },
+    export: { class_type: 'MhooExport', inputs: { edit: ['compose', 0] } }
+  }
+  for (let i = 1; i <= 5; i++)
+    graph[`c${i}`] = {
+      class_type: 'MhooClip',
+      inputs: { video_url: ['source', 0], duration: 30 }
+    }
+  expect(() => planGraph(graph)).toThrow('Timeline must be at most 120 seconds')
 })

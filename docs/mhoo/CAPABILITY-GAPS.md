@@ -59,3 +59,7 @@ Live native upload and estimate checks passed. The uploaded-reference first imag
 Provider submissions are never automatically retried. Polling/archive errors have a bounded retry count and a one-hour overall timeout. An ambiguous submission or stopped local tracking does not prove the provider stopped or did not bill. Saved workflows/settings use eventually consistent KV. A remote hot-refresh preview is not configured; the linked app is production.
 
 See [PIPELINE-VALIDATION.md](PIPELINE-VALIDATION.md) for the schema-checked corrections to SOUL Cinema, camera controls, dialogue and timeline assembly.
+
+## Canvas finishing update
+
+Clip, Sequence, Compose and Export now execute on Cloudflare Containers with FFmpeg and private R2 outputs. The native canvas and saved history cover basic cuts/fades, trim/order, static caption/logo, audio mixing and MP4 export. Live finished-video acceptance passed using a built-in generated image with deterministic motion (no Higgsfield generation charges). See [PRODUCTION-FINISHING.md](PRODUCTION-FINISHING.md) for limits, exact remaining gaps and deployment evidence.
