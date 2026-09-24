@@ -48,3 +48,28 @@ Live finishing-only job `66acc650-6fc1-4b82-960e-ca7e97a3af06` completed: two th
 22 adapter tests pass; two frontend tests, four real Linux FFmpeg tests, full frontend build/typecheck, Worker and renderer typechecks, full lint (199 upstream warnings), changed-file lint, Knip and dry-run pass. Production node connection serialization verified with native graphToPrompt. No public renderer route; no new secrets. Remaining production gaps documented in PRODUCTION-FINISHING.md: embedded drag timeline, timed captions, multi-track audio/ducking, selective generation reuse, immediate mid-render cancellation. Higgsfield paid E2E is explicitly still untested; do not run it under the superseded spending question.
 
 Final release: source commit `4d5f2ef`, Worker `fc582b95-ec6f-4ae2-ba70-4ba3e2f37cb9`, Pages unchanged (`da91fa12`). Pre-commit type-aware checks caught record lookup narrowing and unawaited Node test registrations; fixed the underlying types/awaits and all hooks passed. Final reviewer recheck found no blocker. The mismatch-upload regression uses the test harness to set a false Content-Length internally, because Undici rejects that mismatch before transmission. PR 1 updated to cover generation plus Cloudflare finishing. Anonymous media request still returns Access 302. Saved workflow and finished output verified after browser reload.
+
+## WebMCP and agentic architecture continuation — 24 September 2026
+
+User selected Script-to-Talking Shot as the first complete-stack acceptance
+workflow, superseding the proposed batch-ads-first default. Validated corrections
+and implementation gaps are in AGENTIC-PRODUCTION.md. Jev/Astra API bindings,
+Workflows migration and an exact-speech/lip-sync route are not implemented or
+claimed complete. Existing Durable Object remains the only execution runner.
+No new provider generation spend was authorized or used.
+
+Implemented feature-detected native WebMCP tools: getCanvasState,
+updateNodeParameter, queueCanvasWorkflow (finishing-only), getProductionJob.
+Current live browser exposes document.modelContext. Actual native discovery,
+caption edit, stale-revision refusal, caption restoration, queue and completed
+job read passed. Job 3ec60186-291a-4928-94bd-e97244193a83 completed in 12.23s;
+private R2 MP4 appears visibly in native gallery. This verifies browser tool →
+existing durable runner → Cloudflare FFmpeg → R2 → preview, not paid talking-shot
+generation. No callback injection or public R2 exposure was introduced.
+
+Reviewer identified caller-controlled cost acknowledgment as insufficient;
+removed that flag and blocked Higgsfield generation through WebMCP. Native Run
+remains available under existing user review. Seven focused tests pass, full
+build/typechecks and lint pass (199 upstream warnings), Knip and ADR checks pass.
+Delivery Room update remains pending under the previously recorded unconfirmed
+request; same job, branch, PR and production ownership. No new preview route.

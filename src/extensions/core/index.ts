@@ -62,4 +62,5 @@ if (isNightly && !isCloud) {
 
 if (import.meta.env.VITE_HIGGSFIELD === 'true') {
   await import('./higgsfield')
+  await import('./productionWebMcp')
 }
