@@ -52,6 +52,18 @@
           "enum": [1, 4],
           "title": "Batch Size",
           "type": "integer"
+        },
+        "custom_reference_id": {
+          "type": "string",
+          "format": "uuid",
+          "title": "Completed Soul V2 Reference ID"
+        },
+        "custom_reference_strength": {
+          "type": "number",
+          "default": 1,
+          "minimum": 0,
+          "maximum": 1,
+          "title": "Character Reference Strength"
         }
       },
       "required": ["prompt"],

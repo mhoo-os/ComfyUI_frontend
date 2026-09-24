@@ -111,3 +111,46 @@ it('rejects oversized connected timelines before generation can start', () => {
     }
   expect(() => planGraph(graph)).toThrow('Timeline must be at most 120 seconds')
 })
+
+describe('Soul V2 character conditioning', () => {
+  it('passes a completed reference UUID and rejects zero strength', () => {
+    const node = {
+      class_type: 'HiggsfieldSoul',
+      inputs: {
+        prompt: 'Portrait',
+        custom_reference_id: '12345678-1234-4234-8234-123456789abc',
+        custom_reference_strength: 0.8
+      }
+    }
+    expect(resolveInputs(node, {})).toMatchObject(node.inputs)
+    expect(() =>
+      resolveInputs(
+        { ...node, inputs: { ...node.inputs, custom_reference_strength: 0 } },
+        {}
+      )
+    ).toThrow()
+    expect(() =>
+      resolveInputs(
+        {
+          ...node,
+          inputs: {
+            ...node.inputs,
+            custom_reference_id: 'invented-character-id'
+          }
+        },
+        {}
+      )
+    ).toThrow()
+  })
+  it('omits an empty reference ID for unconditioned generations', () => {
+    expect(
+      resolveInputs(
+        {
+          class_type: 'HiggsfieldSoul',
+          inputs: { prompt: 'Landscape', custom_reference_id: '' }
+        },
+        {}
+      )
+    ).not.toHaveProperty('custom_reference_id')
+  })
+})

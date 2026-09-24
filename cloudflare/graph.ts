@@ -257,6 +257,8 @@ export function resolveInputs(
     }
     input[prop.providerField ?? key] = prop.asArray ? [String(value)] : value
   }
+  if (node.class_type === 'HiggsfieldSoul' && input.custom_reference_id)
+    z.number().positive().max(1).parse(input.custom_reference_strength)
   return node.class_type === 'HiggsfieldTalkingShot'
     ? compileTalkingShot(input)
     : input

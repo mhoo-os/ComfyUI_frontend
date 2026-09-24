@@ -290,3 +290,15 @@ and 11 exceptions: 7 small faces, 1 possible softness, 1 group and 2 no detectio
 No measurement failures.
 No approval changed. Candidate quality does not verify subject identity; family
 carousel 2 remains identity-unconfirmed. UI results verified on production tab.
+
+SOUL V2 fallback preparation (2026-09-25): live provider docs verify
+POST /v1/custom-references with model_version v2 and 1–100 input_images objects;
+poll GET /v1/custom-references/{id} until completed. Use returned account-owned id
+as custom_reference_id for higgsfield-ai/soul/v2/standard. This corrects the earlier
+assumption that training API documentation was unavailable. Soul node catalog now
+supports optional reference UUID and strength; runtime rejects zero strength for
+conditioned requests per documented limitation. 55 backend tests pass. Training
+route/UI integration and actual training remain pending; no paid request sent.
+User asked to switch to Soul2; requested spending cap for training + first portrait.
+Source docs: https://docs.higgsfield.ai/docs/models/soul-id/create-character.md
+and https://docs.higgsfield.ai/docs/models/soul-2/generate.md.
