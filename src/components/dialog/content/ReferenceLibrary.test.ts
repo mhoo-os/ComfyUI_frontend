@@ -32,6 +32,7 @@ function mount() {
   render(ReferenceLibrary, {
     props: { onUse },
     global: {
+      stubs: { ReferenceScreening: true },
       plugins: [createI18n({ legacy: false, locale: 'en', messages: { en } })]
     }
   })

@@ -5503,5 +5503,18 @@
     "maskReview": "Mask preview: check hair, glasses, ears, and neighboring people. Saving keeps this as a separate draft; no facial restoration was applied. Changing the crop clears this mask.",
     "removeMask": "Remove mask",
     "maskedAsset": "Subject mask applied · review edges and likeness"
+  },
+  "referenceScreening": {
+    "title": "Automatic quality check",
+    "explanation": "Checks run on this device. Clear solo photos need no crop. These are screening hints, not identity confirmation or training approval. Keep fewer clear, varied photos instead of adding blurry duplicates.",
+    "progress": "Checked {done}/{total} · {candidates} candidates · {exceptions} exceptions",
+    "rescan": "Check photos again",
+    "candidates": "Clear solo candidates ({count})",
+    "exceptions": "Exceptions ({count})",
+    "small": "Small face — prefer a higher-resolution original",
+    "soft": "Possibly soft or blurred — prefer a sharper photo",
+    "group": "Multiple faces — subject selection needed",
+    "noFace": "No face detected — detection may have missed it",
+    "failed": "Could not check — retry"
   }
 }

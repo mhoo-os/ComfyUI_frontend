@@ -271,3 +271,14 @@ Jev Social supports Instagram discovery but its explicit media download action i
 TikTok-only; it is not yet our Instagram photo import bridge.
 Tagged Instagram collection started through the permitted in-app session; source
 photos and provenance stay in the private local reference archive, outside Git.
+
+2026-09-25 batch screening: ReferenceScreening automatically checks each group's
+current crop or original locally on library open. Reports solo candidates and
+exceptions (small face, possible softness, multiple/no detected faces, failures).
+Native face-size threshold 128px and face-region 128px Laplacian variance threshold
+60 are conservative heuristics, not Higgsfield training requirements. No identity
+recognition, automatic approval, restoration or provider upload. Existing approvals
+are not changed. Results are session-local and recomputed; originals remain intact.
+Thirteen screening/library tests pass and changed-file ESLint passes. Library tests
+stub the independently tested screening child to avoid consuming detector mocks.
+Full build and live batch verification pending below.
