@@ -245,3 +245,19 @@ neighbor detections. They cannot certify training suitability or detect missed
 faces. Mask edges remain subject to explicit review. 13 UI/helper tests and 53
 backend tests pass; backend deployed 3268c60a-5fd8-4b5b-a45a-e87b0bfa19b0.
 Frontend final build and live segmentation acceptance in progress.
+
+Mask release acceptance: source 5c586d4, Pages
+https://19dc959d.mhoo-comfy.pages.dev, Worker unchanged from above. Live test caught
+reversed category semantics; compositor now retains the category at the selected
+seed rather than assuming foreground label 1. Regression tests cover foreground
+labels 0 and 1. 14 UI/helper tests, 53 backend tests, full build/typechecks, lint
+(existing warnings), knip and commit hooks pass. ESLint ignores Wrangler's generated
+temporary directory to avoid a deployment-cleanup race during lint.
+
+Live selected-face → mask → draft save → refresh verified. Masked 111x296 derivative
+persists under original as current crop, previous crop moves into collapsed history,
+mask label is visible and Use in node remains disabled. Original untouched; no
+provider calls, training, restoration or paid generation. Real mask removed adjacent
+faces but retained some sofa/overlapping arm and imperfect edges. This is an optional
+review aid, not a clean-dataset guarantee or automatic approval. No claim of blur,
+yaw or occlusion measurements; checks are dimensions and detected-box geometry.
