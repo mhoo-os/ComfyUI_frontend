@@ -313,3 +313,12 @@ UI using two inspected adult references; provider transitioned not_ready → que
 → in_progress. Private job and reference details are in the local production-v1
 pack. Portrait canvas prepared; live estimate US$0.006. No portrait submitted yet.
 Listed training price US$2.50; actual billing not yet reconciled.
+
+Live completion: Soul ID training reached completed. A single SOUL V2 portrait
+conditioned on that reference completed in 93.07 seconds and appeared on the
+canvas at 1536 × 2048. Saved workflow: Moo adult 2019 — Soul ID portrait.
+Private run record contains provider IDs, output URL and source references.
+One training and one image submission; listed/estimated cost about US$2.506,
+actual provider billing unverified. Likeness/keyframe review remains with Moo
+before video generation. Integration c271cd8 passed commit hooks (format, lint,
+app/backend typechecks), pre-push knip and the prior 56 backend tests/build.

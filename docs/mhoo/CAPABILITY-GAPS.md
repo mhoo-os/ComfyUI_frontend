@@ -123,8 +123,12 @@ Estimates do not transfer photos. Revoking approval prevents future use and does
 not remove copies already sent to a provider. Active submissions briefly lock
 review/metadata changes, up to five minutes following an ambiguous failure.
 
-This is source-photo review, not Soul ID training or generated-keyframe approval.
-No verified Soul training API/minimum dataset is implemented. Group-photo
-selection uses an explicit subject description; crop extraction and identity
-continuity evaluation remain gaps. Existing direct Higgsfield upload buttons
+Soul ID V2 training is now available in the reference library through the
+documented API. One live two-reference training completed on 25 September 2026.
+The provider accepts 1–100 photos; 5–20 remains a dataset-planning suggestion,
+not an API minimum. Cropping, optional subject masks and local quality screening
+are available. Quality screening does not identify a person or approve likeness.
+Generated-keyframe approval and cross-shot identity evaluation remain separate
+production gates. The initial training UI permits one saved attempt and does not
+automatically retry uncertain submissions. Existing direct Higgsfield upload buttons
 remain a separate explicitly initiated transfer path, not private-library ingest.
