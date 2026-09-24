@@ -6,6 +6,10 @@ Date: 2026-09-22
 
 Proposed
 
+The backend infrastructure below is deferred at the user's direction and
+requires Cloud backend team agreement. Current FE-2736 uses existing Cloud
+endpoints, as recorded in WORKSHOP-CATALOG-0037.
+
 The publication/export portion is superseded by the accepted
 [WORKSHOP-CATALOG-0037](WORKSHOP-CATALOG-0037-shared-pages-and-authored-execution-catalogs.md).
 The user requires an offline-authored workflow JSONL catalog and reuse of the

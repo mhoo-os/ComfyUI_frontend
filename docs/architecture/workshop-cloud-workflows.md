@@ -1,13 +1,13 @@
 # Cloud workflows in Models / Workshop
 
-Status: FE-2736 implementation design, updated 2026-09-23. The Cloud API and
-website integration are implemented in stacked draft PRs; deployment and staging
-acceptance remain open. The page/catalog decision is
+Status: historical infrastructure proposal, deferred 2026-09-23. The current
+preview uses existing Cloud upload, prompt, job and short-link endpoints, with
+no new backend deployment. The accepted current decision is
 [WORKSHOP-CATALOG-0037](../adr/WORKSHOP-CATALOG-0037-shared-pages-and-authored-execution-catalogs.md).
-The Cloud lifecycle proposal remains in
-[WORKSHOP-WORKFLOWS-0036](../adr/WORKSHOP-WORKFLOWS-0036-published-app-definitions-and-durable-cloud-runs.md).
-The [test strategy](../testing/workshop-cloud-workflows.md) defines the evidence
-required before enablement.
+The remaining document records the deferred proposal; its backend additions
+require prior Cloud backend team agreement. The frontend future branch is
+`benjcooley/fe-2736-workshop-runtime-future`; Cloud PRs #10444, #10445 and #10470
+are deferred. Cleanup of superseded code is a separate follow-up.
 
 Scope correction, 2026-09-23: workflow metadata is prepared offline by a person
 or agent and committed as JSONL. Existing Models INPUTS define the form; the
