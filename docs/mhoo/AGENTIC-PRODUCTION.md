@@ -55,11 +55,12 @@ Workflows execution for this node. The existing default AI Gateway uses the
 user-selected codex-lb and typesafe BYOK aliases. No provider key is exposed to
 the Worker or browser; the Worker uses existing gateway authentication.
 Live planner compatibility passed through the existing gateway: Jev 1.352s,
-Astra 5.808s on one sample (not a latency guarantee). Still unverified:
-exact-dialogue/lip-sync fidelity and paid video acceptance. The selected Seedance text-to-video route generates
+Astra 5.808s on one sample (not a latency guarantee). Paid single-shot execution subsequently passed in 416.45 seconds, including
+R2 archival, native playback and exact dialogue transcription. Precise lip-sync
+fidelity still needs human playback review; see CAPABILITY-GAPS.md. The selected Seedance text-to-video route generates
 audio from prompt instructions; it is labeled experimental. Built-in ChatGPT image generation is available in this
-conversation, not as an API credential inside the app. No new provider spending
-was authorized by the user's selection of that image generator.
+conversation, not as an API credential inside the app. That image-generator selection did not authorize provider spending. The user
+subsequently approved one Higgsfield render up to USD 3; that single test completed.
 
 ## Payload enforcement
 

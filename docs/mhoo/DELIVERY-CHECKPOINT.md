@@ -105,3 +105,27 @@ then returned 200: Jev single_speaker confidence 0.84 in 1352ms; Astra scene
 expansion in 5808ms. Dialogue remained literal. No Higgsfield paid submission.
 The new real-Workflows Jev→Astra→provider test covers runtime fetch semantics
 with simulated services. Full-stack paid video acceptance remains outstanding.
+
+## Authorized paid acceptance — 25 September 2026
+
+User explicitly approved one Higgsfield render capped at USD 3 (estimate ~USD
+2.31). Switched the saved talking workflow to jev_astra, saved, and clicked native
+Run exactly once. Job 6fb05b32-177c-4f81-bc80-46487646541c / provider
+a834faf2-480f-4b07-a331-52a5962d3f97 completed in 416.45s. Jev single_speaker
+0.99/1093ms, Astra 5666ms. Browser reload during generation preserved the active
+job. Private R2 archival and native gallery playback passed. Output 5.041667sec,
+1280x720/24fps H264/AAC, 3471622 bytes; local Whisper small transcribed the exact
+requested “Your next big idea starts here.” Frame samples show stable character
+and speaking motion, but precise lip alignment is not measured and needs human
+creative approval. Final billed amount unavailable; no repeat submission.
+
+Completed history verified after reload and authenticated range playback returned
+206 bytes 0-1023/3471622. See CAPABILITY-GAPS.md for SHA256 and acceptance detail.
+Local analysis files /tmp/comfy-talking-shot.mp4, /tmp/comfy-talking-shot.wav,
+/tmp/comfy-talking-transcript.txt, /tmp/comfy-talking-contact.jpg are temporary;
+private R2 is the retained output. No code/deployment changes in this acceptance
+turn. Existing code checks remain applicable. Independent reviewer confirmed metadata/hash, clean audio/video decoding, exact
+transcript and stable sampled character/composition. No release blocker; face
+shadow/size limits precise lip-sync assessment from stills.
+Delivery Room read succeeded, but metadata remains revision 1 with old fork-only
+scope; previous unconfirmed save is still pending, not treated as acceptance.
