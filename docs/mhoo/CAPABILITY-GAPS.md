@@ -57,3 +57,5 @@ Live native upload and estimate checks passed. The uploaded-reference first imag
 - [Billing and retention](https://docs.higgsfield.ai/docs/concepts/billing-and-retention.md)
 
 Provider submissions are never automatically retried. Polling/archive errors have a bounded retry count and a one-hour overall timeout. An ambiguous submission or stopped local tracking does not prove the provider stopped or did not bill. Saved workflows/settings use eventually consistent KV. A remote hot-refresh preview is not configured; the linked app is production.
+
+See [PIPELINE-VALIDATION.md](PIPELINE-VALIDATION.md) for the schema-checked corrections to SOUL Cinema, camera controls, dialogue and timeline assembly.

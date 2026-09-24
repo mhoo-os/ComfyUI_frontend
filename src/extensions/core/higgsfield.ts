@@ -23,7 +23,9 @@ app.registerExtension({
     })
   },
   nodeCreated(node) {
-    if (!node.type.startsWith('Higgsfield')) return
+    const comfyClass: unknown = node.constructor.comfyClass
+    if (typeof comfyClass !== 'string' || !comfyClass.startsWith('Higgsfield'))
+      return
     for (const widget of node.widgets ?? []) {
       if (!['image_url', 'end_image_url'].includes(widget.name)) continue
       node.addWidget(
