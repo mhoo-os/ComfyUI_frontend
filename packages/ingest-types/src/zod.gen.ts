@@ -2269,7 +2269,8 @@ export const zCreateHubProfileRequest = z.object({
 export const zChurnkeyAuthResponse = z.object({
   auth_hash: z.string(),
   customer_id: z.string(),
-  mode: z.enum(['live', 'test', 'sandbox'])
+  mode: z.enum(['live', 'test', 'sandbox']),
+  offer_subscription_id: z.string().min(1).optional()
 })
 
 /**
@@ -2697,8 +2698,7 @@ export const zAgentPostMessageRequest = z.object({
   current_tab_unbound: z.boolean().optional(),
   draft: z
     .object({
-      content: z.record(z.unknown()).optional(),
-      version: z.number().int().nullish()
+      content: z.record(z.unknown()).optional()
     })
     .optional(),
   open_tabs: z
@@ -3483,6 +3483,7 @@ export const zGetExtensionsResponse = z.array(z.string())
  * Success
  */
 export const zGetFeaturesResponse = z.object({
+  billing_web_url: z.string().optional(),
   free_tier_balance: z
     .object({
       allowance: z.number().int(),
@@ -3491,6 +3492,7 @@ export const zGetFeaturesResponse = z.object({
     })
     .optional(),
   max_upload_size: z.number().int().optional(),
+  stripe_publishable_key: z.string().optional(),
   supports_preview_metadata: z.boolean().optional()
 })
 

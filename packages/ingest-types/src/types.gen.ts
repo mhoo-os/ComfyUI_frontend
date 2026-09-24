@@ -3750,6 +3750,16 @@ export type ChurnkeyAuthResponse = {
    * Churnkey environment matching the configured app
    */
   mode: 'live' | 'test' | 'sandbox'
+  /**
+   * Stripe subscription a native Churnkey retention offer may apply to.
+   * Present only when the caller is in the native-offer rollout and owns
+   * a Personal workspace on an active paid monthly plan with no billing
+   * change in flight; absent otherwise, and the client then keeps offers
+   * disabled. Present in any mode. Not a signed authorization: the HMAC
+   * covers only the customer ID.
+   *
+   */
+  offer_subscription_id?: string
 }
 
 /**
@@ -4526,7 +4536,7 @@ export type AgentPostMessageRequest = {
    */
   current_tab_unbound?: boolean
   /**
-   * The client's live canvas, sent so the agent operates on what the user currently sees instead of an empty or stale draft. Reuses the {content, version} shape returned by GET /api/agent/draft. Additive — older clients omit it and the agent falls back to the stored draft.
+   * The client's live canvas, sent so the agent operates on what the user currently sees instead of an empty or stale draft. The canvas is authoritative for this send and carries no version token — the draft version returned by GET /api/agent/draft is a projection-cache snapshot counter, not a concurrency token, so there is no version to reconcile and no 409 on this field. Additive — older clients omit the whole object and the agent falls back to the stored draft.
    */
   draft?: {
     /**
@@ -4535,10 +4545,6 @@ export type AgentPostMessageRequest = {
     content?: {
       [key: string]: unknown
     }
-    /**
-     * The draft version the client last saw; null or 0 on first send. If it does not match the server's current draft version, the server returns 409 with the current version (an agent write landed since the client last saw the draft).
-     */
-    version?: number | null
   }
   /**
    * Snapshot of the client's open editor tabs in editor order. Advisory context, not a grant — entries outside the caller's workspace are ignored. With workflow_references present, only the editable target and explicit references enter the model's workflow context.
@@ -7048,6 +7054,10 @@ export type GetBillingBalanceErrors = {
    * Internal server error
    */
   500: ErrorResponse
+  /**
+   * Balance read temporarily unavailable
+   */
+  503: ErrorResponse
 }
 
 export type GetBillingBalanceError =
@@ -7903,6 +7913,10 @@ export type GetFeaturesResponses = {
    */
   200: {
     /**
+     * Origin of the billing-web deployment paired with this Cloud environment (e.g. https://billing.comfy.org). Absent when BILLING_WEB_URL is not configured on the server, so a client can tell "not configured" from "configured as empty".
+     */
+    billing_web_url?: string
+    /**
      * Free-tier job allowance for an authenticated non-paid (FREE-tier) user in the rollout. Absent for paid users and unauthenticated requests. Synthesized from config before a grant row exists so a brand-new user still sees their full allowance.
      */
     free_tier_balance?: {
@@ -7923,6 +7937,10 @@ export type GetFeaturesResponses = {
      * Maximum upload size in bytes
      */
     max_upload_size?: number
+    /**
+     * Stripe publishable key (pk_...) for the environment's Stripe account. Public by design (the secret key is never exposed here). Absent when STRIPE_PUBLISHABLE_KEY is not configured on the server, so a client can tell "not configured" from "configured as empty".
+     */
+    stripe_publishable_key?: string
     /**
      * Whether the server supports preview metadata
      */
