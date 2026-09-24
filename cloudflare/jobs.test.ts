@@ -833,22 +833,124 @@ describe('Private character reference review', () => {
     expect(response.status).toBe(400)
     expect(provider).not.toHaveBeenCalled()
   })
-  it('retains the submission lock when provider acceptance is uncertain', async () => {
-    const mf = await runtime(async (request) => {
-      const path = new URL(request.url).pathname
-      if (path === '/files/generate-upload-url')
-        return Response.json({
-          public_url: 'https://provider.example/reference.png',
-          upload_url: 'https://provider.example/upload',
-          upload_headers: {}
-        })
-      if (path === '/upload') return new Response(null)
-      return new Response('upstream connection lost', { status: 502 })
+  it.for([502, 200])(
+    'retains the submission lock when provider acceptance is uncertain (%s)',
+    async (status) => {
+      const mf = await runtime(async (request) => {
+        const path = new URL(request.url).pathname
+        if (path === '/files/generate-upload-url')
+          return Response.json({
+            public_url: 'https://provider.example/reference.png',
+            upload_url: 'https://provider.example/upload',
+            upload_headers: {}
+          })
+        if (path === '/upload') return new Response(null)
+        return new Response('{}', { status })
+      })
+      const asset = await describeAsset(mf, await upload(mf))
+      await review(mf, asset)
+      await queue(mf, referenceGraph(asset))
+      await tick(mf)
+      expect((await review(mf, asset, 'draft')).status).toBe(409)
+    }
+  )
+  it('saves a crop as a separate draft with lineage and keeps the approved original intact', async () => {
+    const provider = vi.fn(async () => Response.json({}))
+    const mf = await runtime(provider)
+    const original = await describeAsset(mf, await upload(mf))
+    await review(mf, original)
+    const crop = {
+      parentId: original.id,
+      parentRevision: original.revision,
+      parentEtag: original.etag,
+      sourceWidth: 100,
+      sourceHeight: 100,
+      x: 10,
+      y: 20,
+      width: 32,
+      height: 40,
+      method: 'browser-canvas-crop-v1'
+    }
+    const bytes = new Uint8Array(24)
+    bytes.set(png)
+    const view = new DataView(bytes.buffer)
+    view.setUint32(16, 32)
+    view.setUint32(20, 40)
+    const result = await mf.dispatchFetch('https://test/character-assets', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'image/png',
+        'Content-Length': String(bytes.length),
+        'X-Reference-Crop': JSON.stringify(crop)
+      },
+      body: bytes
     })
-    const asset = await describeAsset(mf, await upload(mf))
-    await review(mf, asset)
-    await queue(mf, referenceGraph(asset))
-    await tick(mf)
-    expect((await review(mf, asset, 'draft')).status).toBe(409)
+    expect(result.status).toBe(201)
+    const child = await result.json()
+    expect(child).toMatchObject({
+      revision: 1,
+      approval: null,
+      crop,
+      metadata: {
+        character: 'Test subject',
+        era: '2020',
+        subject: '',
+        view: 'unknown'
+      }
+    })
+    const childId = assetSchema.parse(child).id
+    expect(childId).not.toBe(original.id)
+    const listed = z
+      .array(assetSchema)
+      .parse(
+        await (await mf.dispatchFetch('https://test/character-assets')).json()
+      )
+    expect(
+      listed.find((item) => item.id === original.id)?.approval
+    ).toMatchObject({ revision: original.revision, etag: original.etag })
+    expect(provider).not.toHaveBeenCalled()
   })
+  it.for(['stale', 'outside', 'dimensions'] as const)(
+    'rejects a %s crop without creating an asset',
+    async (mode) => {
+      const mf = await runtime(async () => Response.json({}))
+      const original = await describeAsset(mf, await upload(mf))
+      const crop = {
+        parentId: original.id,
+        parentRevision: mode === 'stale' ? 1 : original.revision,
+        parentEtag: original.etag,
+        sourceWidth: 100,
+        sourceHeight: 100,
+        x: mode === 'outside' ? 90 : 0,
+        y: 0,
+        width: 32,
+        height: 32,
+        method: 'browser-canvas-crop-v1'
+      }
+      const bytes = new Uint8Array(24)
+      bytes.set(png)
+      const view = new DataView(bytes.buffer)
+      view.setUint32(16, mode === 'dimensions' ? 64 : 32)
+      view.setUint32(20, 32)
+      const result = await mf.dispatchFetch('https://test/character-assets', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'image/png',
+          'Content-Length': String(bytes.length),
+          'X-Reference-Crop': JSON.stringify(crop)
+        },
+        body: bytes
+      })
+      expect(result.status).toBe(400)
+      expect(
+        z
+          .array(assetSchema)
+          .parse(
+            await (
+              await mf.dispatchFetch('https://test/character-assets')
+            ).json()
+          )
+      ).toHaveLength(1)
+    }
+  )
 })

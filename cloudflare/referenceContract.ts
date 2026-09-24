@@ -13,6 +13,27 @@ export const referenceMetadata = z
     source: z.string().max(1000).default('')
   })
   .strict()
+export const referenceCrop = z
+  .object({
+    parentId: z.string().uuid(),
+    parentRevision: z.number().int().positive(),
+    parentEtag: z.string().min(1).max(200),
+    sourceWidth: z.number().int().min(16).max(16384),
+    sourceHeight: z.number().int().min(16).max(16384),
+    x: z.number().int().nonnegative(),
+    y: z.number().int().nonnegative(),
+    width: z.number().int().min(16),
+    height: z.number().int().min(16),
+    method: z.literal('browser-canvas-crop-v1')
+  })
+  .strict()
+  .refine(
+    (crop) =>
+      crop.x + crop.width <= crop.sourceWidth &&
+      crop.y + crop.height <= crop.sourceHeight &&
+      crop.sourceWidth * crop.sourceHeight <= 40000000,
+    'Crop must fit within the source image (maximum 40 megapixels).'
+  )
 export const referenceAsset = z.object({
   id: z.string().uuid(),
   name: z.string(),
@@ -22,6 +43,7 @@ export const referenceAsset = z.object({
   contentType: z.string(),
   created: z.number(),
   metadata: referenceMetadata,
+  crop: referenceCrop.optional(),
   approval: z
     .object({ revision: z.number(), etag: z.string(), at: z.number() })
     .nullable()

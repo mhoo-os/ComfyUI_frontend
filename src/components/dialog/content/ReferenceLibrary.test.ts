@@ -109,4 +109,19 @@ describe('Character reference library', () => {
       '2021'
     )
   })
+  it('opens crop review without changing approval and cancels without uploading', async () => {
+    vi.mocked(api.fetchApi).mockResolvedValueOnce(Response.json([asset]))
+    mount()
+    await screen.findByText('Approved')
+    await userEvent.click(screen.getByRole('button', { name: 'Crop' }))
+    expect(
+      await screen.findByRole('heading', { name: 'Crop portrait.png' })
+    ).toBeVisible()
+    expect(
+      screen.getByRole('button', { name: 'Save crop as draft' })
+    ).toBeDisabled()
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.getByText('Approved')).toBeVisible()
+    expect(api.fetchApi).toHaveBeenCalledTimes(1)
+  })
 })

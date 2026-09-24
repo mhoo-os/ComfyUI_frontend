@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 import {
   referenceMetadata,
+  referenceCrop,
   referenceToken,
   approvedReference
 } from './referenceContract'
@@ -71,6 +72,27 @@ export class ReferenceLibrary {
       ])
     }
     if (path === '/character-assets' && request.method === 'POST') {
+      const cropHeader = request.headers.get('x-reference-crop')
+      if (cropHeader && cropHeader.length > 2048)
+        throw new Error('Crop metadata too large.')
+      const crop = cropHeader
+        ? referenceCrop.parse(JSON.parse(cropHeader))
+        : undefined
+      const parent = crop
+        ? await this.storage.get<ReferenceAsset>(prefix + crop.parentId)
+        : undefined
+      if (crop) {
+        const original = await this.env.COMFY_MEDIA.head(keyFor(crop.parentId))
+        if (
+          !parent ||
+          parent.revision !== crop.parentRevision ||
+          parent.etag !== crop.parentEtag ||
+          original?.etag !== parent.etag
+        )
+          throw new Error('Original changed. Reopen the crop editor.')
+        if (request.headers.get('content-type') !== 'image/png')
+          throw new Error('Crops must be PNG images.')
+      }
       const size = Number(request.headers.get('content-length'))
       const type = request.headers.get('content-type') ?? ''
       if (
@@ -92,7 +114,7 @@ export class ReferenceLibrary {
       const reader = request.body.getReader()
       const initial: Uint8Array[] = []
       let received = 0
-      while (received < 12) {
+      while (received < (crop ? 24 : 12)) {
         const { done, value } = await reader.read()
         if (done) throw new Error('Image is truncated.')
         received += value.length
@@ -111,6 +133,21 @@ export class ReferenceLibrary {
       if (!signature(first, type)) {
         await reader.cancel()
         throw new Error('Image bytes do not match its file type.')
+      }
+      if (crop) {
+        const header = new DataView(
+          first.buffer,
+          first.byteOffset,
+          first.byteLength
+        )
+        if (
+          first.length < 24 ||
+          header.getUint32(16) !== crop.width ||
+          header.getUint32(20) !== crop.height
+        ) {
+          await reader.cancel()
+          throw new Error('Crop dimensions do not match the uploaded PNG.')
+        }
       }
       const bounded = new FixedLengthStream(size)
       const writer = bounded.writable.getWriter()
@@ -146,13 +183,27 @@ export class ReferenceLibrary {
         size,
         contentType: type,
         created: Date.now(),
-        metadata: referenceMetadata.parse({}),
+        metadata: parent
+          ? { ...parent.metadata, subject: '', view: 'unknown' }
+          : referenceMetadata.parse({}),
+        ...(crop && { crop }),
         approval: null
       }
       try {
         await this.storage.transaction(async (txn) => {
           if ((await txn.list({ prefix, limit: 200 })).size >= 200)
             throw new Error('Reference library is limited to 200 photos.')
+          if (crop) {
+            const current = await txn.get<ReferenceAsset>(
+              prefix + crop.parentId
+            )
+            if (
+              !current ||
+              current.revision !== crop.parentRevision ||
+              current.etag !== crop.parentEtag
+            )
+              throw new Error('Original changed. Reopen the crop editor.')
+          }
           await txn.put(prefix + id, asset)
         })
       } catch (error) {

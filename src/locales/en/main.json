@@ -5452,5 +5452,28 @@
       "profile": "Profile",
       "other": "Other"
     }
+  },
+  "referenceCrop": {
+    "open": "Crop",
+    "title": "Crop {name}",
+    "help": "Drag the box to move it; drag its corners or edges to resize. Keep the full face, hair and chin. You can also enter pixel coordinates.",
+    "original": "Original",
+    "result": "Crop preview",
+    "pixels": "{width} × {height} pixels · no upscaling",
+    "small": "Small crop: facial detail may be limited. Enlarging pixels would not recover missing detail.",
+    "x": "Left (pixels)",
+    "y": "Top (pixels)",
+    "width": "Width (pixels)",
+    "height": "Height (pixels)",
+    "save": "Save crop as draft",
+    "reset": "Reset selection",
+    "review": "The original stays unchanged. The new crop needs its own subject/view review and approval before use.",
+    "invalid": "Keep the selection inside the image, at least 16 pixels wide and tall.",
+    "unsupported": "Use an image between 16 pixels and 40 megapixels, with no side above 16,384 pixels.",
+    "loadFailed": "Could not load the original. Close and reopen the crop editor.",
+    "failed": "Could not create the crop. Try again or choose a smaller selection.",
+    "tooLarge": "The crop exceeds the 20 MB upload limit. Choose a smaller selection.",
+    "saveFailed": "Could not save the crop. The original may have changed; refresh the library and try again.",
+    "derivative": "Cropped copy · {width} × {height} pixels"
   }
 }

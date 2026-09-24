@@ -168,3 +168,33 @@ node is disabled. No provider upload or paid generation was initiated. Personal
 asset identity and source details remain in private storage, not this repo.
 Library is open for user review. Remaining collection import, cropping, Soul
 training and generated-keyframe approval are not claimed complete.
+
+## Crop and review continuation — 25 September 2026
+
+User requested implementation of native crop/review after importing the reference
+archive. Same job/checkpoint/branch. Reused VideoCropOverlay and useCropBoxEditor;
+manual selection with pixel controls, side-by-side original and rendered crop,
+native-resolution PNG (no generative restoration). Private upload includes a
+strict parent ID/revision/ETag and in-bounds pixel rectangle. Server verifies
+parent state before and after upload, PNG output dimensions and storage limit.
+Lineage is declared browser processing metadata, not a cryptographic proof that
+client-supplied bytes were obtained by that transformation. Originals and their
+approvals are unchanged; derived assets always start draft with subject/view
+cleared for re-review. Crop approval remains bound to stored derivative bytes.
+
+Full suite exposed a prior prompt.maxLength access regression in TalkingShot:
+its schema has scene/dialogue rather than prompt. Explicit own-property fallback
+restores execution. Moved provider response validation inside the reference
+submission lease so malformed 2xx retains the ambiguous-submission lock.
+52 backend tests pass, including crop lineage, stale parent, bounds, size,
+approval preservation and TalkingShot regression paths. Live release pending.
+Delivery Room update remains pending under the previously recorded access gap.
+
+Live crop acceptance: Worker beaf1bb8-05c4-4ec5-b4cb-8788cd9a7ae2,
+Pages https://82cdc992.mhoo-comfy.pages.dev. Fresh page required to load new UI.
+Opened Crop on confirmed original, adjusted numeric bounds and inspected
+side-by-side preview. Saved a 100x190 PNG privately; library count increased
+17→18, new crop is draft, subject/view reset for review, original remains approved.
+No provider request or generation. The low-resolution warning is displayed.
+13 UI/crop-controller tests pass. Client-declared lineage limitation accepted
+and documented; no claim of server-recomputed or verified source pixels.

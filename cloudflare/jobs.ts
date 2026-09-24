@@ -310,7 +310,10 @@ export class ComfyJobs extends DurableObject<Env> {
             await new ReferenceLibrary(this.ctx.storage, this.env).resolve(
               resolveInputs(node, {}),
               true,
-              models[node.class_type].schema.properties.prompt.maxLength ?? 8000
+              Object.hasOwn(models[node.class_type].schema.properties, 'prompt')
+                ? (models[node.class_type].schema.properties.prompt.maxLength ??
+                    8000)
+                : 8000
             )
           )
         )
@@ -680,13 +683,19 @@ export class ComfyJobs extends DurableObject<Env> {
         job.submitting = true
         await this.save(job)
         this.broadcast('executing', { node: nodeId, prompt_id: job.id })
-        const result = resultSchema.parse(
-          await new ReferenceLibrary(this.ctx.storage, this.env).submit(
-            resolveInputs(node, job.outputs),
-            models[node.class_type].schema.properties.prompt.maxLength ?? 8000,
-            (input) =>
-              provider(this.env, models[node.class_type].endpoint, input)
-          )
+        const result = await new ReferenceLibrary(
+          this.ctx.storage,
+          this.env
+        ).submit(
+          resolveInputs(node, job.outputs),
+          Object.hasOwn(models[node.class_type].schema.properties, 'prompt')
+            ? (models[node.class_type].schema.properties.prompt.maxLength ??
+                8000)
+            : 8000,
+          async (input) =>
+            resultSchema.parse(
+              await provider(this.env, models[node.class_type].endpoint, input)
+            )
         )
         job.requestId = result.request_id
         job.providerRequests = {

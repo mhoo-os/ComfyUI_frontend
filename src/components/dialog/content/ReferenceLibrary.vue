@@ -10,6 +10,15 @@ import {
 import type { ReferenceAsset } from '../../../../cloudflare/referenceContract'
 import { api } from '@/scripts/api'
 
+import ReferenceCrop from './ReferenceCrop.vue'
+
+const cropping = ref<ReferenceAsset | null>(null)
+function cropped(asset: ReferenceAsset) {
+  assets.value = [asset, ...assets.value]
+  cropping.value = null
+  editing.value = referenceAsset.parse(asset)
+}
+
 const { onUse } = defineProps<{ onUse: (asset: ReferenceAsset) => void }>()
 const { t } = useI18n()
 const assets = ref<ReferenceAsset[]>([])
@@ -159,13 +168,15 @@ onMounted(() => {
 <template>
   <section class="flex max-h-[75vh] w-full flex-col gap-4 overflow-y-auto p-5">
     <h2 class="m-0 text-lg font-semibold">{{ t('referenceLibrary.title') }}</h2>
-    <p class="m-0 text-muted">{{ t('referenceLibrary.explanation') }}</p>
+    <p v-if="!cropping" class="m-0 text-muted">
+      {{ t('referenceLibrary.explanation') }}
+    </p>
     <p v-if="error" role="alert" class="font-semibold">{{ error }}</p>
     <fieldset
       :disabled="operation !== 'idle'"
       class="flex flex-col gap-4 border-0 p-0"
     >
-      <div class="flex flex-wrap items-center gap-3">
+      <div v-if="!cropping" class="flex flex-wrap items-center gap-3">
         <label class="flex flex-col gap-1">
           {{ t('referenceLibrary.upload') }}
           <input
@@ -185,7 +196,7 @@ onMounted(() => {
         <button
           type="button"
           class="rounded-sm border px-3 py-2"
-          :disabled="!selected.length || !!editing"
+          :disabled="!selected.length || !!editing || !!cropping"
           @click="review('approve')"
         >
           {{ t('referenceLibrary.approve') }}
@@ -193,19 +204,26 @@ onMounted(() => {
         <button
           type="button"
           class="rounded-sm border px-3 py-2"
-          :disabled="!selected.length || !!editing"
+          :disabled="!selected.length || !!editing || !!cropping"
           @click="review('draft')"
         >
           {{ t('referenceLibrary.revoke') }}
         </button>
       </div>
-      <p role="status">
+      <p v-if="!cropping" role="status">
         {{
           operation === 'idle'
             ? t('referenceLibrary.count', { count: assets.length })
             : t(`referenceLibrary.${operation}`)
         }}
       </p>
+      <ReferenceCrop
+        v-if="cropping"
+        :key="cropping.id"
+        :asset="cropping"
+        @saved="cropped"
+        @cancel="cropping = null"
+      />
       <form
         v-if="editing"
         class="grid gap-3 rounded-sm border p-4 sm:grid-cols-2"
@@ -274,7 +292,10 @@ onMounted(() => {
       <p v-if="!assets.length && operation === 'idle'">
         {{ t('referenceLibrary.empty') }}
       </p>
-      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div
+        v-if="!cropping"
+        class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
+      >
         <article
           v-for="asset in assets"
           :key="asset.id"
@@ -305,11 +326,27 @@ onMounted(() => {
             {{ asset.metadata.character }} · {{ asset.metadata.era }}
           </p>
           <p class="m-0">{{ asset.metadata.subject }}</p>
-          <div class="flex gap-2">
+          <p v-if="asset.crop" class="m-0">
+            {{
+              t('referenceCrop.derivative', {
+                width: asset.crop.width,
+                height: asset.crop.height
+              })
+            }}
+          </p>
+          <div class="flex flex-wrap gap-2">
             <button
               type="button"
               class="rounded-sm border px-3 py-2"
-              :disabled="!!editing"
+              :disabled="!!editing || !!cropping"
+              @click="cropping = asset"
+            >
+              {{ t('referenceCrop.open') }}
+            </button>
+            <button
+              type="button"
+              class="rounded-sm border px-3 py-2"
+              :disabled="!!editing || !!cropping"
               @click="editing = referenceAsset.parse(asset)"
             >
               {{ t('referenceLibrary.edit') }}
@@ -317,7 +354,7 @@ onMounted(() => {
             <button
               type="button"
               class="rounded-sm border px-3 py-2"
-              :disabled="!!editing || !approvedReference(asset)"
+              :disabled="!!editing || !!cropping || !approvedReference(asset)"
               @click="use(asset)"
             >
               {{ t('referenceLibrary.use') }}
