@@ -88,7 +88,12 @@
     "zipdist": "tsx scripts/zipdist.ts",
     "test:custom-nodes:local": "start-server-and-test backend:custom-nodes http-get://127.0.0.1:8288/system_stats dev:custom-nodes http-get://localhost:5173 test:custom-nodes",
     "backend:custom-nodes": "sh -c 'cd \"${TEST_COMFYUI_DIR:?point at your ComfyUI checkout (README Prerequisites)}\"; cp \"$OLDPWD/browser_tests/assets/plain_video.mp4\" input/ || { echo \"could not stage plain_video.mp4 into $PWD/input - the curated VHS workflow cannot run without it\" >&2; exit 1; }; PY=python3; [ -x venv/bin/python ] && PY=venv/bin/python; [ -x .venv/bin/python ] && PY=.venv/bin/python; \"$PY\" main.py --port 8288 --multi-user --cache-none'",
-    "dev:custom-nodes": "cross-env DEV_SERVER_COMFYUI_URL=http://127.0.0.1:8288 vite --config vite.config.mts --strictPort"
+    "dev:custom-nodes": "cross-env DEV_SERVER_COMFYUI_URL=http://127.0.0.1:8288 vite --config vite.config.mts --strictPort",
+    "build:higgsfield": "cross-env VITE_HIGGSFIELD=true ENABLE_MINIFY=true GENERATE_SOURCEMAP=false pnpm build",
+    "test:higgsfield": "vitest run --config cloudflare/vitest.config.ts",
+    "typecheck:higgsfield": "tsc -p cloudflare/tsconfig.json",
+    "deploy:higgsfield:assets": "wrangler pages deploy dist --project-name mhoo-comfy --branch main",
+    "deploy:higgsfield:api": "wrangler deploy --config cloudflare/wrangler.jsonc"
   },
   "dependencies": {
     "@alloc/quick-lru": "catalog:",
@@ -141,6 +146,7 @@
     "firebase": "catalog:",
     "fuse.js": "7.0.0",
     "glob": "catalog:",
+    "jose": "catalog:",
     "loglevel": "^1.9.2",
     "marked": "^15.0.11",
     "mediabunny": "catalog:",
@@ -165,6 +171,7 @@
     "zod-validation-error": "catalog:"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "catalog:",
     "@comfyorg/ingest-types": "workspace:*",
     "@eslint/js": "catalog:",
     "@intlify/eslint-plugin-vue-i18n": "catalog:",
@@ -191,6 +198,7 @@
     "@vitest/ui": "catalog:",
     "@webgpu/types": "catalog:",
     "cross-env": "catalog:",
+    "esbuild": "catalog:",
     "eslint": "catalog:",
     "eslint-config-prettier": "catalog:",
     "eslint-import-resolver-typescript": "catalog:",
@@ -214,6 +222,7 @@
     "knip": "catalog:",
     "lint-staged": "catalog:",
     "markdown-table": "catalog:",
+    "miniflare": "catalog:",
     "mixpanel-browser": "catalog:",
     "monocart-coverage-reports": "catalog:",
     "openai": "catalog:",
@@ -243,6 +252,7 @@
     "vue-component-type-helpers": "catalog:",
     "vue-eslint-parser": "catalog:",
     "vue-tsc": "catalog:",
+    "wrangler": "catalog:",
     "yaml": "catalog:",
     "zip-dir": "^2.0.0",
     "zod-to-json-schema": "catalog:"

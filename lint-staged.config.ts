@@ -77,6 +77,7 @@ function lintCommands(
 // Directories outside the root program, each with its own tsconfig.
 const standaloneTypecheckScripts = {
   'browser_tests/': 'typecheck:browser',
+  'cloudflare/': 'typecheck:higgsfield',
   'scripts/': 'typecheck:scripts',
   'tools/': 'typecheck:tools',
   'apps/website/': 'typecheck:website',

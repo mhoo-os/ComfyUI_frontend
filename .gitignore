@@ -120,3 +120,7 @@ matrix-proof/
 browser_tests/fixtures/data/agent/conversations/recordings/
 apps/website/acceptance-results/
 apps/website/acceptance-report/
+
+# Local Cloudflare runtime state
+.wrangler/
+.dev.vars*
