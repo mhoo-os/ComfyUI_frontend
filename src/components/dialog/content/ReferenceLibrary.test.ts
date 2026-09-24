@@ -120,6 +120,21 @@ describe('Character reference library', () => {
     expect(
       screen.getByRole('button', { name: 'Save crop as draft' })
     ).toBeDisabled()
+    const original = screen.getByRole('img', { name: 'portrait.png' })
+    Object.defineProperties(original, {
+      naturalWidth: { value: 720 },
+      naturalHeight: { value: 538 }
+    })
+    await fireEvent.load(original)
+    expect(
+      screen.getByRole('spinbutton', { name: 'Left (pixels)' })
+    ).toHaveValue(108)
+    expect(
+      screen.getByRole('spinbutton', { name: 'Top (pixels)' })
+    ).toHaveValue(81)
+    expect(
+      screen.getByRole('spinbutton', { name: 'Width (pixels)' })
+    ).toHaveValue(504)
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(screen.getByText('Approved')).toBeVisible()
     expect(api.fetchApi).toHaveBeenCalledTimes(1)

@@ -36,7 +36,7 @@ function loaded() {
   const image = source.value
   if (!image) return
   dimensions.value = { width: image.naturalWidth, height: image.naturalHeight }
-  bounds.value = { x: 0, y: 0, ...dimensions.value }
+  bounds.value = initialSelection()
   phase.value = crop.value.success ? 'editing' : 'failed'
   if (phase.value === 'failed') error.value = t('referenceCrop.unsupported')
 }
@@ -57,8 +57,20 @@ watchEffect(() => {
     .getContext('2d')
     ?.drawImage(image, x, y, width, height, 0, 0, canvas.width, canvas.height)
 })
+function initialSelection(): Bounds {
+  const { width, height } = dimensions.value
+  const x = Math.min(
+    Math.round(width * 0.15),
+    Math.max(0, Math.floor((width - 16) / 2))
+  )
+  const y = Math.min(
+    Math.round(height * 0.15),
+    Math.max(0, Math.floor((height - 16) / 2))
+  )
+  return { x, y, width: width - 2 * x, height: height - 2 * y }
+}
 function reset() {
-  bounds.value = { x: 0, y: 0, ...dimensions.value }
+  bounds.value = initialSelection()
 }
 async function save() {
   const selected = crop.value
