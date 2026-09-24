@@ -181,6 +181,7 @@ export default defineConfig([
       'components.d.ts',
       'cloudflare/worker-configuration.d.ts',
       'coverage/*',
+      'public/face-detector/vision_wasm*.js',
       'dist/*',
       'apps/*/dist/**',
       'apps/*/.astro/**',

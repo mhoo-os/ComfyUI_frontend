@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "ignorePatterns": [
+    "public/face-detector/vision_wasm*.js",
     "**/vite.config.*.timestamp*",
     "**/vitest.config.*.timestamp*",
     "components.d.ts",

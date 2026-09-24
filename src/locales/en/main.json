@@ -5451,12 +5451,18 @@
       "three-quarter": "Three-quarter",
       "profile": "Profile",
       "other": "Other"
-    }
+    },
+    "needsReview": "Needs crop review",
+    "needsSelection": "Needs face selection",
+    "currentCrop": "Current crop",
+    "cropFirst": "Choose your face to create a crop. Your original is kept here.",
+    "history": "Older crops ({count})",
+    "approvedCrops": "Only groups with an approved current crop"
   },
   "referenceCrop": {
     "open": "Crop",
     "title": "Crop {name}",
-    "help": "Drag the box to move it; drag its corners or edges to resize. Keep the full face, hair and chin. You can also enter pixel coordinates.",
+    "help": "Click your face to suggest a head-and-shoulders crop. Adjust only if needed.",
     "original": "Original",
     "result": "Crop preview",
     "pixels": "{width} × {height} pixels · no upscaling",
@@ -5474,6 +5480,16 @@
     "failed": "Could not create the crop. Try again or choose a smaller selection.",
     "tooLarge": "The crop exceeds the 20 MB upload limit. Choose a smaller selection.",
     "saveFailed": "Could not save the crop. The original may have changed; refresh the library and try again.",
-    "derivative": "Cropped copy · {width} × {height} pixels"
+    "derivative": "Cropped copy · {width} × {height} pixels",
+    "manual": "Select crop manually",
+    "chooseAgain": "Choose a different face",
+    "selectFace": "Select face {number}",
+    "detection": {
+      "loading": "Finding faces on this device…",
+      "ready": "Click the numbered box around your face. Detection does not identify people.",
+      "failed": "Face detection could not load. You can select a crop manually or reopen to retry.",
+      "empty": "No faces found. Select a crop manually for this photo."
+    },
+    "adjust": "Review the suggested crop. Adjust if needed, then save as draft."
   }
 }

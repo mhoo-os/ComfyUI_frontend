@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import { computed, ref, useTemplateRef, watchEffect } from 'vue'
+import {
+  computed,
+  onBeforeUnmount,
+  ref,
+  useTemplateRef,
+  watchEffect
+} from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import {
@@ -10,6 +16,35 @@ import type { ReferenceAsset } from '../../../../cloudflare/referenceContract'
 import VideoCropOverlay from '@/components/videoEdit/VideoCropOverlay.vue'
 import type { Bounds } from '@/renderer/core/layout/types'
 import { api } from '@/scripts/api'
+
+import { detectReferenceFaces, portraitBounds } from './referenceFaces'
+
+const detection = ref<{
+  phase: 'loading' | 'ready' | 'failed'
+  faces: Bounds[]
+}>({ phase: 'loading', faces: [] })
+const choosingFace = ref(true)
+let disposed = false
+onBeforeUnmount(() => {
+  disposed = true
+})
+async function findFaces(image: HTMLImageElement) {
+  try {
+    const faces = await detectReferenceFaces(image)
+    if (!disposed) detection.value = { phase: 'ready', faces }
+  } catch {
+    if (!disposed) detection.value = { phase: 'failed', faces: [] }
+  }
+}
+function selectFace(face: Bounds) {
+  bounds.value = portraitBounds(
+    face,
+    dimensions.value.width,
+    dimensions.value.height,
+    detection.value.faces
+  )
+  choosingFace.value = false
+}
 
 const { asset } = defineProps<{ asset: ReferenceAsset }>()
 const emit = defineEmits<{ saved: [asset: ReferenceAsset]; cancel: [] }>()
@@ -39,6 +74,7 @@ function loaded() {
   bounds.value = initialSelection()
   phase.value = crop.value.success ? 'editing' : 'failed'
   if (phase.value === 'failed') error.value = t('referenceCrop.unsupported')
+  else void findFaces(image)
 }
 function failed() {
   phase.value = 'failed'
@@ -135,6 +171,34 @@ async function save() {
       {{ t('referenceCrop.title', { name: asset.name }) }}
     </h3>
     <p class="m-0">{{ t('referenceCrop.help') }}</p>
+    <p role="status">
+      {{
+        t(
+          !choosingFace
+            ? 'referenceCrop.adjust'
+            : `referenceCrop.detection.${detection.phase === 'ready' && !detection.faces.length ? 'empty' : detection.phase}`
+        )
+      }}
+    </p>
+    <div class="flex flex-wrap gap-2">
+      <button
+        v-if="choosingFace"
+        type="button"
+        class="rounded-sm border px-3 py-2"
+        @click="choosingFace = false"
+      >
+        {{ t('referenceCrop.manual') }}
+      </button>
+      <button
+        v-else-if="detection.faces.length"
+        type="button"
+        :disabled="phase !== 'editing'"
+        class="rounded-sm border px-3 py-2"
+        @click="choosingFace = true"
+      >
+        {{ t('referenceCrop.chooseAgain') }}
+      </button>
+    </div>
     <p v-if="error" role="alert">{{ error }}</p>
     <div class="grid items-start gap-4 sm:grid-cols-2">
       <div>
@@ -149,16 +213,34 @@ async function save() {
             @load="loaded"
             @error="failed"
           />
+          <button
+            v-for="(face, index) in choosingFace ? detection.faces : []"
+            :key="index"
+            type="button"
+            class="absolute cursor-pointer border-2 border-white bg-black/10 text-white focus-visible:outline-4 focus-visible:outline-white"
+            :style="{
+              left: `${(100 * face.x) / dimensions.width}%`,
+              top: `${(100 * face.y) / dimensions.height}%`,
+              width: `${(100 * face.width) / dimensions.width}%`,
+              height: `${(100 * face.height) / dimensions.height}%`
+            }"
+            :aria-label="t('referenceCrop.selectFace', { number: index + 1 })"
+            @click="selectFace(face)"
+          >
+            <span class="absolute top-0 left-0 bg-black px-1">{{
+              index + 1
+            }}</span>
+          </button>
           <VideoCropOverlay
-            v-if="phase !== 'loading' && phase !== 'failed'"
+            v-if="!choosingFace && phase !== 'loading' && phase !== 'failed'"
             v-model="bounds"
             :source-width="dimensions.width"
             :source-height="dimensions.height"
-            :disabled="phase !== 'editing' || !crop.success"
+            :disabled="choosingFace || phase !== 'editing' || !crop.success"
           />
         </div>
       </div>
-      <div class="flex flex-col items-start gap-2">
+      <div v-if="!choosingFace" class="flex flex-col items-start gap-2">
         <h4>{{ t('referenceCrop.result') }}</h4>
         <canvas
           v-show="crop.success && phase !== 'loading'"
@@ -208,7 +290,7 @@ async function save() {
     <div class="flex flex-wrap gap-3">
       <button
         type="button"
-        :disabled="phase !== 'editing' || !crop.success"
+        :disabled="choosingFace || phase !== 'editing' || !crop.success"
         class="rounded-sm border px-3 py-2"
         @click="save"
       >

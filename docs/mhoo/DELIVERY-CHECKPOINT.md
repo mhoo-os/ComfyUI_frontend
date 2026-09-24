@@ -198,3 +198,23 @@ side-by-side preview. Saved a 100x190 PNG privately; library count increased
 No provider request or generation. The low-resolution warning is displayed.
 13 UI/crop-controller tests pass. Client-declared lineage limitation accepted
 and documented; no claim of server-recomputed or verified source pixels.
+
+## Automatic face selection and grouped references — 25 September 2026
+
+Same job and checkout, branch codex/higgsfield-pages. User requested automatic
+face boxes and grouping derivatives under originals. Added lazy browser-only
+MediaPipe BlazeFace detection (pinned Tasks Vision 0.10.32, self-hosted runtime
+and model). User selects a numbered face; native-resolution portrait suggestion
+clips to image edges and limits padding near neighboring faces. No recognition,
+provider transmission, restoration or automatic approval. Manual fallback remains
+for missed faces/model load failures. Live sofa image produced three boxes;
+confirmed center-right face selection produced a valid draft-ready crop.
+
+Library follows parent lineage (including nested crops), newest derivative is
+current, older versions are collapsed history, original metadata/approvals remain
+untouched. Existing 23 assets group automatically without migration. Filter shows
+groups with approved current crops; this is not a Soul training dataset exporter.
+Eight focused tests cover selection, review constraints, grouping and crop bounds.
+First deployed verification: https://68422662.mhoo-comfy.pages.dev. Final refinement
+and release verification pending. Room metadata remains stale under previously
+recorded update failure; pending reconciliation, no duplicate job/issue created.

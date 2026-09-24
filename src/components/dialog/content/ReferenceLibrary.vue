@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { z } from 'zod'
 
@@ -11,8 +11,16 @@ import type { ReferenceAsset } from '../../../../cloudflare/referenceContract'
 import { api } from '@/scripts/api'
 
 import ReferenceCrop from './ReferenceCrop.vue'
+import ReferenceAssetCard from './ReferenceAssetCard.vue'
+import { groupReferences } from './referenceGroups'
 
+const library = useTemplateRef<HTMLElement>('library')
 const cropping = ref<ReferenceAsset | null>(null)
+async function startCrop(asset: ReferenceAsset) {
+  cropping.value = asset
+  await nextTick()
+  if (library.value) library.value.scrollTop = 0
+}
 function cropped(asset: ReferenceAsset) {
   assets.value = [asset, ...assets.value]
   cropping.value = null
@@ -23,6 +31,14 @@ const { onUse } = defineProps<{ onUse: (asset: ReferenceAsset) => void }>()
 const { t } = useI18n()
 const assets = ref<ReferenceAsset[]>([])
 const selected = ref<string[]>([])
+const approvedOnly = ref(false)
+const groups = computed(() => groupReferences(assets.value))
+const visibleGroups = computed(() =>
+  groups.value.filter(
+    (group) =>
+      !approvedOnly.value || (group.current && approvedReference(group.current))
+  )
+)
 const editing = ref<ReferenceAsset | null>(null)
 const operation = ref<
   'idle' | 'loading' | 'uploading' | 'saving' | 'reviewing'
@@ -166,7 +182,10 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="flex max-h-[75vh] w-full flex-col gap-4 overflow-y-auto p-5">
+  <section
+    ref="library"
+    class="flex max-h-[75vh] w-full flex-col gap-4 overflow-y-auto p-5"
+  >
     <h2 class="m-0 text-lg font-semibold">{{ t('referenceLibrary.title') }}</h2>
     <p v-if="!cropping" class="m-0 text-muted">
       {{ t('referenceLibrary.explanation') }}
@@ -210,6 +229,14 @@ onMounted(() => {
           {{ t('referenceLibrary.revoke') }}
         </button>
       </div>
+      <label v-if="!cropping"
+        ><input
+          v-model="approvedOnly"
+          type="checkbox"
+          @change="selected = []"
+        />
+        {{ t('referenceLibrary.approvedCrops') }}</label
+      >
       <p v-if="!cropping" role="status">
         {{
           operation === 'idle'
@@ -292,75 +319,67 @@ onMounted(() => {
       <p v-if="!assets.length && operation === 'idle'">
         {{ t('referenceLibrary.empty') }}
       </p>
-      <div
-        v-if="!cropping"
-        class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
-      >
-        <article
-          v-for="asset in assets"
-          :key="asset.id"
-          class="flex flex-col gap-2 rounded-lg border p-3"
+      <div v-if="!cropping" class="grid grid-cols-1 gap-4">
+        <section
+          v-for="group in visibleGroups"
+          :key="group.original.id"
+          class="flex flex-col gap-3 rounded-lg border p-4"
         >
-          <a
-            :href="api.apiURL(`/character-assets/${asset.id}/preview`)"
-            target="_blank"
-            rel="noopener"
-          >
-            <img
-              :src="api.apiURL(`/character-assets/${asset.id}/preview`)"
-              :alt="asset.name"
-              loading="lazy"
-              class="h-48 w-full rounded-sm object-contain"
-            />
-          </a>
-          <label class="flex items-center gap-2 break-all"
-            ><input v-model="selected" type="checkbox" :value="asset.id" />
-            {{ asset.name }}</label
-          >
+          <h3 class="m-0 font-semibold break-all">{{ group.original.name }}</h3>
           <strong>{{
-            approvedReference(asset)
-              ? t('referenceLibrary.approved')
-              : t('referenceLibrary.draft')
+            t(
+              group.current
+                ? approvedReference(group.current)
+                  ? 'referenceLibrary.approved'
+                  : 'referenceLibrary.needsReview'
+                : 'referenceLibrary.needsSelection'
+            )
           }}</strong>
-          <p class="m-0">
-            {{ asset.metadata.character }} · {{ asset.metadata.era }}
-          </p>
-          <p class="m-0">{{ asset.metadata.subject }}</p>
-          <p v-if="asset.crop" class="m-0">
-            {{
-              t('referenceCrop.derivative', {
-                width: asset.crop.width,
-                height: asset.crop.height
-              })
-            }}
-          </p>
-          <div class="flex flex-wrap gap-2">
-            <button
-              type="button"
-              class="rounded-sm border px-3 py-2"
-              :disabled="!!editing || !!cropping"
-              @click="cropping = asset"
-            >
-              {{ t('referenceCrop.open') }}
-            </button>
-            <button
-              type="button"
-              class="rounded-sm border px-3 py-2"
-              :disabled="!!editing || !!cropping"
-              @click="editing = referenceAsset.parse(asset)"
-            >
-              {{ t('referenceLibrary.edit') }}
-            </button>
-            <button
-              type="button"
-              class="rounded-sm border px-3 py-2"
-              :disabled="!!editing || !!cropping || !approvedReference(asset)"
-              @click="use(asset)"
-            >
-              {{ t('referenceLibrary.use') }}
-            </button>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div>
+              <h4>{{ t('referenceCrop.original') }}</h4>
+              <ReferenceAssetCard
+                v-model="selected"
+                :asset="group.original"
+                :disabled="!!editing"
+                @crop="startCrop(group.original)"
+                @edit="editing = referenceAsset.parse($event)"
+                @use="use"
+              />
+            </div>
+            <div v-if="group.current">
+              <h4>{{ t('referenceLibrary.currentCrop') }}</h4>
+              <ReferenceAssetCard
+                v-model="selected"
+                :asset="group.current"
+                :disabled="!!editing"
+                @crop="startCrop(group.original)"
+                @edit="editing = referenceAsset.parse($event)"
+                @use="use"
+              />
+            </div>
+            <p v-else>{{ t('referenceLibrary.cropFirst') }}</p>
           </div>
-        </article>
+          <details v-if="group.history.length">
+            <summary class="cursor-pointer">
+              {{
+                t('referenceLibrary.history', { count: group.history.length })
+              }}
+            </summary>
+            <div class="grid gap-4 pt-3 sm:grid-cols-2">
+              <ReferenceAssetCard
+                v-for="older in group.history"
+                :key="older.id"
+                v-model="selected"
+                :asset="older"
+                :disabled="!!editing"
+                @crop="startCrop(group.original)"
+                @edit="editing = referenceAsset.parse($event)"
+                @use="use"
+              />
+            </div>
+          </details>
+        </section>
       </div>
     </fieldset>
   </section>

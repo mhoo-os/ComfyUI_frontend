@@ -8,6 +8,7 @@ import en from '@/locales/en/main.json'
 import { api } from '@/scripts/api'
 
 import ReferenceLibrary from './ReferenceLibrary.vue'
+import * as referenceFaces from './referenceFaces'
 
 const asset = referenceAsset.parse({
   id: '2bf4de45-6926-4b44-bd5a-62d6e72537b1',
@@ -36,6 +37,7 @@ function mount() {
   return onUse
 }
 beforeEach(() => {
+  vi.spyOn(referenceFaces, 'detectReferenceFaces').mockResolvedValue([])
   vi.spyOn(api, 'fetchApi').mockReset()
   vi.spyOn(api, 'apiURL').mockImplementation((path) => path)
 })
@@ -139,4 +141,33 @@ describe('Character reference library', () => {
     expect(screen.getByText('Approved')).toBeVisible()
     expect(api.fetchApi).toHaveBeenCalledTimes(1)
   })
+})
+
+it('lets the user select a detected face before saving a suggested crop', async () => {
+  vi.mocked(api.fetchApi).mockResolvedValueOnce(Response.json([asset]))
+  vi.mocked(referenceFaces.detectReferenceFaces).mockResolvedValueOnce([
+    { x: 200, y: 100, width: 80, height: 100 }
+  ])
+  mount()
+  await screen.findByText('Approved')
+  await userEvent.click(screen.getByRole('button', { name: 'Crop' }))
+  const original = screen.getByRole('img', { name: 'portrait.png' })
+  Object.defineProperties(original, {
+    naturalWidth: { value: 720 },
+    naturalHeight: { value: 538 }
+  })
+  await fireEvent.load(original)
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Select face 1' })
+  )
+  expect(screen.getByRole('spinbutton', { name: 'Left (pixels)' })).toHaveValue(
+    160
+  )
+  expect(
+    screen.getByRole('spinbutton', { name: 'Width (pixels)' })
+  ).toHaveValue(160)
+  expect(
+    screen.getByRole('button', { name: 'Save crop as draft' })
+  ).toBeEnabled()
+  expect(api.fetchApi).toHaveBeenCalledTimes(1)
 })

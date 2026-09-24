@@ -176,6 +176,7 @@ catalog:
   esbuild: ^0.28.2
   miniflare: 5.20260921.0-alpha
   '@cloudflare/containers': ^0.3.7
+  '@mediapipe/tasks-vision': 0.10.32
 
 cleanupUnusedCatalogs: true
 
