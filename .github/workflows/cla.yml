@@ -16,6 +16,7 @@ permissions:
 
 jobs:
   cla-assistant:
+    if: github.repository == 'Comfy-Org/ComfyUI_frontend'
     runs-on: ubuntu-latest
     steps:
       - name: CLA already verified before merge queue

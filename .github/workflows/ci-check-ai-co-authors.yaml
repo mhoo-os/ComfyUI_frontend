@@ -8,6 +8,7 @@ permissions:
 
 jobs:
   check-ai-co-authors:
+    if: github.repository == 'Comfy-Org/ComfyUI_frontend'
     name: Check for AI agent co-author trailers
     runs-on: ubuntu-latest
 
