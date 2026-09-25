@@ -78,7 +78,7 @@ export default {
         })
       }
       if (path === '/review' && request.method === 'POST')
-        return reviewRoute(request, env, await boundedJson(request))
+        return await reviewRoute(request, env, await boundedJson(request))
       if (path.startsWith('/film/')) {
         const film = await filmRoute(request, env, path)
         if (film) return film

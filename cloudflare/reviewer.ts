@@ -11,6 +11,7 @@ const thresholds = {
   lumaShift: 0.15,
   stillMotion: 0.004,
   stillSeconds: 2,
+  holdMotion: 0.01,
   actionRatio: 0.6,
   durationSlack: 1
 }
@@ -77,25 +78,70 @@ export function measuredDefects(shot: ShotSpec, analysis: Analysis): Defect[] {
       note: `Clip is ${round(duration)}s; the shot is ${shot.duration}s. Beat windows were scaled to fit.`
     })
 
+  // Every sustained window is compared with the opening colour, so a shift
+  // that recovers before the end still counts. Tint catches green/magenta.
   const edge = Math.max(1, Math.round(samples.length * 0.2))
-  const head = samples.slice(0, edge)
-  const tail = samples.slice(-edge)
-  const warmth = (list: typeof samples) => mean(list.map((s) => s.r - s.b))
-  const hueShift = warmth(tail) - warmth(head)
-  const lumaShift =
-    mean(tail.map((s) => s.luma)) - mean(head.map((s) => s.luma))
-  if (
-    Math.abs(hueShift) > thresholds.hueShift ||
-    Math.abs(lumaShift) > thresholds.lumaShift
-  ) {
-    const shiftAt = samples.find(
-      (s) => Math.abs(s.r - s.b - warmth(head)) > thresholds.hueShift
-    )?.t
+  const colour = (list: typeof samples) => {
+    const r = mean(list.map((s) => s.r))
+    const g = mean(list.map((s) => s.g))
+    const b = mean(list.map((s) => s.b))
+    return {
+      warmth: r - b,
+      tint: g - (r + b) / 2,
+      luma: mean(list.map((s) => s.luma))
+    }
+  }
+  const base = colour(samples.slice(0, edge))
+  const shiftOf = (value: ReturnType<typeof colour>) => ({
+    warmth: value.warmth - base.warmth,
+    tint: value.tint - base.tint,
+    luma: value.luma - base.luma
+  })
+  const drifted = (shift: ReturnType<typeof shiftOf>) =>
+    Math.abs(shift.warmth) > thresholds.hueShift ||
+    Math.abs(shift.tint) > thresholds.hueShift ||
+    Math.abs(shift.luma) > thresholds.lumaShift
+  let drift:
+    | { at: number; until: number; peak: ReturnType<typeof shiftOf> }
+    | undefined
+  let peakSize = 0
+  for (let start = edge; start + edge <= samples.length; start++) {
+    const window = samples.slice(start, start + edge)
+    const shift = shiftOf(colour(window))
+    if (!drifted(shift)) continue
+    const size = Math.max(
+      Math.abs(shift.warmth),
+      Math.abs(shift.tint),
+      Math.abs(shift.luma)
+    )
+    drift ??= {
+      at:
+        window.find((sample) => drifted(shiftOf(colour([sample]))))?.t ??
+        window[0].t,
+      until: 0,
+      peak: shift
+    }
+    drift.until = window.at(-1)!.t
+    if (size > peakSize) {
+      peakSize = size
+      drift.peak = shift
+    }
+  }
+  if (drift) {
+    const { peak } = drift
+    const changes = [
+      Math.abs(peak.warmth) > thresholds.hueShift &&
+        `${peak.warmth < 0 ? 'cooling (warm → blue)' : 'warming'} of ${round(Math.abs(peak.warmth))}`,
+      Math.abs(peak.tint) > thresholds.hueShift &&
+        `${peak.tint < 0 ? 'magenta' : 'green'} tint of ${round(Math.abs(peak.tint))}`,
+      Math.abs(peak.luma) > thresholds.lumaShift &&
+        `brightness change of ${round(peak.luma)}`
+    ].filter(Boolean)
     defects.push({
       kind: 'color_drift',
-      at: shiftAt ?? tail[0].t,
-      until: duration,
-      note: `Whole-frame ${hueShift < 0 ? 'cooling (warm → blue)' : 'warming'} of ${round(Math.abs(hueShift))}${Math.abs(lumaShift) > thresholds.lumaShift ? ` and brightness change of ${round(lumaShift)}` : ''}. The spec holds one colour state (${shot.colorState}).`
+      at: round(drift.at),
+      until: round(Math.min(duration, drift.until + 1 / 8)),
+      note: `Whole-frame ${changes.join(' and ')} against the opening frames. The spec holds one colour state (${shot.colorState}).`
     })
   }
 
@@ -105,20 +151,26 @@ export function measuredDefects(shot: ShotSpec, analysis: Analysis): Defect[] {
   const within = (from: number, to: number) =>
     moving.filter((s) => s.t >= from && s.t < to).map((s) => s.motion)
 
+  // Only the part of a still run that falls outside hold beats counts.
   let runStart: number | undefined
   for (const sample of [...moving, { t: duration, motion: Infinity }]) {
     if (sample.motion < thresholds.stillMotion) runStart ??= sample.t
     else if (runStart !== undefined) {
-      const beat = windows.find((w) => runStart! >= w.from && runStart! < w.to)
-      if (
-        sample.t - runStart >= thresholds.stillSeconds &&
-        beat?.kind !== 'hold'
-      )
+      const from = runStart
+      const overlaps = windows
+        .filter((w) => w.kind !== 'hold')
+        .map((w) => ({
+          kind: w.kind,
+          seconds: Math.min(sample.t, w.to) - Math.max(from, w.from)
+        }))
+        .filter((overlap) => overlap.seconds > 0)
+      const still = overlaps.reduce((sum, overlap) => sum + overlap.seconds, 0)
+      if (still >= thresholds.stillSeconds)
         defects.push({
           kind: 'still_stretch',
-          at: round(runStart),
+          at: round(from),
           until: round(sample.t),
-          note: `${round(sample.t - runStart)}s with almost no movement during the ${beat?.kind ?? 'shot'} beat.`
+          note: `${round(still)}s with almost no movement during the ${[...new Set(overlaps.map((overlap) => overlap.kind))].join(' and ')} beat${overlaps.length > 1 ? 's' : ''}.`
         })
       runStart = undefined
     }
@@ -138,7 +190,7 @@ export function measuredDefects(shot: ShotSpec, analysis: Analysis): Defect[] {
   const last = windows.at(-1)
   if (last && last.kind === 'hold') {
     const ending = mean(within(Math.max(last.from, duration - 0.75), duration))
-    if (ending > overall)
+    if (ending > thresholds.holdMotion)
       defects.push({
         kind: 'no_ending_hold',
         at: round(duration - 0.75),
@@ -149,14 +201,13 @@ export function measuredDefects(shot: ShotSpec, analysis: Analysis): Defect[] {
   return defects
 }
 
-function criteria(shot: ShotSpec) {
-  let at = 0
+/** Beat deadlines use the same scaled windows as the measured checks. */
+function criteria(shot: ShotSpec, duration: number) {
   return [
-    ...shot.beats.map((beat) => {
-      const line = `By ${at + beat.seconds}s (${beat.kind}): ${beat.performance}`
-      at += beat.seconds
-      return line
-    }),
+    ...beatWindows(shot, duration).map(
+      (window) =>
+        `By ${round(window.to)}s (${window.kind}): ${window.performance}`
+    ),
     ...shot.evaluation,
     ...shot.continuity.map((rule) => `Continuity: ${rule}`),
     ...shot.forbidden.map((item) => `Must not show: ${item}`),
@@ -181,7 +232,7 @@ const visionSchema = z.object({
 export type VisionReview = z.infer<typeof visionSchema>
 
 export function visionRequest(shot: ShotSpec, analysis: Analysis) {
-  const list = criteria(shot)
+  const list = criteria(shot, analysis.duration)
   return {
     model: 'gpt-6-astra',
     store: false,

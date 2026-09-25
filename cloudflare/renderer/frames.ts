@@ -22,20 +22,32 @@ function run(command: string, args: string[], signal: AbortSignal) {
   return new Promise<Buffer>((resolve, reject) => {
     const child = spawn(command, args, {
       signal,
+      killSignal: 'SIGKILL',
       stdio: ['ignore', 'pipe', 'pipe']
     })
     const chunks: Buffer[] = []
     let size = 0
+    let errors = ''
     child.stdout.on('data', (chunk: Buffer) => {
       size += chunk.length
       if (size > 64 * 1024 * 1024) child.kill('SIGKILL')
       else chunks.push(chunk)
     })
+    // Drain stderr so a noisy decoder can't fill the pipe and stall.
+    child.stderr.on('data', (chunk: Buffer) => {
+      errors = (errors + chunk.toString()).slice(-2000)
+    })
     child.on('error', reject)
     child.on('close', (code) =>
       code === 0
         ? resolve(Buffer.concat(chunks))
-        : reject(new Error(`${command} exited with ${code}`))
+        : reject(
+            new Error(
+              size > 64 * 1024 * 1024
+                ? `${command} output exceeded 64MB`
+                : `${command} failed: ${errors.slice(-500)}`
+            )
+          )
     )
   })
 }
@@ -157,7 +169,7 @@ export async function analyse(
       ],
       signal
     )
-    const [image] = splitJpegs(jpeg)
+    const image = splitJpegs(jpeg).at(0)
     if (image)
       keyframes.push({
         t: Number(t.toFixed(3)),

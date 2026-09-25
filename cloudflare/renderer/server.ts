@@ -141,7 +141,19 @@ async function frames(
     return
   }
   busy = true
-  const signal = AbortSignal.timeout(2 * 60 * 1000)
+  // Like /render: the timeout or a disconnect cancels the upload as well as ffmpeg.
+  const controller = new AbortController()
+  const { signal } = controller
+  const timeout = setTimeout(
+    () => {
+      controller.abort()
+      if (!request.complete) request.destroy()
+    },
+    2 * 60 * 1000
+  )
+  response.on('close', () => {
+    if (!response.writableFinished) controller.abort()
+  })
   let directory: string | undefined
   try {
     const count = Number(url.searchParams.get('count') ?? 8)
@@ -155,8 +167,10 @@ async function frames(
       if (!Buffer.isBuffer(chunk)) throw new Error('Invalid upload')
       size += chunk.length
       if (size > 250 * 1024 * 1024) throw new Error('Clip exceeds 250MB')
+      if (signal.aborted) throw new Error('Upload timed out')
       chunks.push(chunk)
     }
+    if (signal.aborted) throw new Error('Upload timed out')
     directory = await mkdtemp(join(tmpdir(), 'comfy-frames-'))
     const path = join(directory, 'clip.mp4')
     await writeFile(path, Buffer.concat(chunks))
@@ -179,6 +193,7 @@ async function frames(
         })
       )
   } finally {
+    clearTimeout(timeout)
     try {
       if (directory) await rm(directory, { recursive: true, force: true })
     } finally {
