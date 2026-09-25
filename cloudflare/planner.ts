@@ -29,7 +29,7 @@ const responseSchema = z.object({
 })
 type PlannerEnv = Pick<Env, 'PLANNER_GATEWAY_AUTH' | 'PLANNER_GATEWAY_URL'>
 
-async function gateway(
+export async function gateway(
   env: PlannerEnv,
   provider: 'typesafe' | 'codex-lb',
   endpoint: string,

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 
+import { analyse } from './frames.ts'
 import { parseManifest, render } from './render.ts'
 
 const maxBytes = 500 * 1024 * 1024
@@ -12,6 +13,11 @@ let busy = false
 const server = createServer(async (request, response) => {
   if (request.url === '/health' && request.method === 'GET') {
     response.writeHead(200).end('ok')
+    return
+  }
+  const url = new URL(request.url ?? '/', 'http://renderer')
+  if (url.pathname === '/frames' && request.method === 'POST') {
+    await frames(request, response, url)
     return
   }
   if (request.url !== '/render' || request.method !== 'POST') {
@@ -124,5 +130,61 @@ const server = createServer(async (request, response) => {
     }
   }
 })
+async function frames(
+  request: import('node:http').IncomingMessage,
+  response: import('node:http').ServerResponse,
+  url: URL
+) {
+  if (busy) {
+    response.writeHead(503, { 'Retry-After': '10' }).end('Renderer busy')
+    return
+  }
+  busy = true
+  const signal = AbortSignal.timeout(2 * 60 * 1000)
+  let directory: string | undefined
+  try {
+    const count = Number(url.searchParams.get('count') ?? 8)
+    if (!Number.isInteger(count) || count < 3 || count > 16)
+      throw new Error('count must be an integer from 3 to 16')
+    if (request.headers['content-type'] !== 'video/mp4')
+      throw new Error('Send the clip as video/mp4')
+    const chunks: Buffer[] = []
+    let size = 0
+    for await (const chunk of request) {
+      if (!Buffer.isBuffer(chunk)) throw new Error('Invalid upload')
+      size += chunk.length
+      if (size > 250 * 1024 * 1024) throw new Error('Clip exceeds 250MB')
+      chunks.push(chunk)
+    }
+    directory = await mkdtemp(join(tmpdir(), 'comfy-frames-'))
+    const path = join(directory, 'clip.mp4')
+    await writeFile(path, Buffer.concat(chunks))
+    const result = await analyse(path, count, signal)
+    response
+      .writeHead(200, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store'
+      })
+      .end(JSON.stringify(result))
+  } catch (error) {
+    response
+      .writeHead(signal.aborted ? 504 : 400, {
+        'Content-Type': 'application/json'
+      })
+      .end(
+        JSON.stringify({
+          error:
+            error instanceof Error ? error.message : 'Frame analysis failed'
+        })
+      )
+  } finally {
+    try {
+      if (directory) await rm(directory, { recursive: true, force: true })
+    } finally {
+      busy = false
+    }
+  }
+}
+
 server.requestTimeout = 8 * 60 * 1000
 server.listen(Number(process.env.PORT || 8080), '0.0.0.0')

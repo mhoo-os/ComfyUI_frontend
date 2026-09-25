@@ -3,6 +3,7 @@ import { z } from 'zod'
 
 import { compileTalkingShot, talkingShotSchema } from './talkingShot'
 import { filmRoute } from './film'
+import { reviewRoute } from './reviewer'
 import { routeShot, expandShot } from './planner'
 import { models, nodeDefinitions } from './graph'
 import { boundedJson, json } from './jobs'
@@ -76,6 +77,8 @@ export default {
           ]
         })
       }
+      if (path === '/review' && request.method === 'POST')
+        return reviewRoute(request, env, await boundedJson(request))
       if (path.startsWith('/film/')) {
         const film = await filmRoute(request, env, path)
         if (film) return film
