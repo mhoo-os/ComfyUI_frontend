@@ -10,13 +10,16 @@ import { z } from 'zod'
 const text = (max: number) => z.string().trim().min(1).max(max)
 const slug = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u)
 
-/** Reference to real media only: an archived key, an https URL, or a named
- * placeholder that blocks rendering until someone supplies the asset. */
+/** Reference to real media only: an archived key, an approved character
+ * library token, an https URL, or a named placeholder that blocks rendering
+ * until someone supplies the asset. */
 const assetRef = z
   .string()
-  .regex(/^(?:mhoo-media:[\w/.-]+|https:\/\/\S+|pending:[a-z0-9-]+)$/u)
+  .regex(
+    /^(?:mhoo-media:[\w/.-]+|mhoo-asset:[0-9a-f-]{36}:[1-9]\d*|https:\/\/\S+|pending:[a-z0-9-]+)$/u
+  )
 
-export const beatSchema = z
+const beatSchema = z
   .object({
     kind: z.enum(['anticipation', 'action', 'reaction', 'hold']),
     performance: text(400),
@@ -24,7 +27,7 @@ export const beatSchema = z
   })
   .strict()
 
-export const cameraSchema = z
+const cameraSchema = z
   .object({
     size: z.enum([
       'extreme_wide',
@@ -55,7 +58,7 @@ export const cameraSchema = z
   })
   .strict()
 
-export const referenceSchema = z
+const referenceSchema = z
   .object({
     role: z.enum([
       'identity',
@@ -84,7 +87,7 @@ const voSchema = z
   .object({ text: text(300), clean: text(300).optional() })
   .strict()
 
-export const colorStates = [
+const colorStates = [
   'warm',
   'cold',
   'gold',
@@ -194,7 +197,7 @@ export const sceneSpecSchema = z
   })
 
 export type ShotSpec = z.infer<typeof shotSpecSchema>
-export type SceneSpec = z.infer<typeof sceneSpecSchema>
+type SceneSpec = z.infer<typeof sceneSpecSchema>
 
 /** Reasons a valid shot still cannot be rendered. Empty means ready. */
 export function renderBlockers(shot: ShotSpec) {
