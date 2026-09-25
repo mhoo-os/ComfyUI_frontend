@@ -561,7 +561,7 @@ jobs:
 
   ecosystem-matrix-status:
     name: Custom Nodes Ecosystem Matrix test
-    if: always()
+    if: always() && github.repository == 'Comfy-Org/ComfyUI_frontend'
     needs:
       - changes
       - pin-status
