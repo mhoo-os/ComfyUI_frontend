@@ -5,6 +5,9 @@ import { boundedJson } from './http'
 import { renderBlockers, sceneSpecSchema } from './shotSpec'
 import type { ShotSpec } from './shotSpec'
 
+/** Review fixtures share an episode with its real scene; they never count as the episode's scene. */
+const TEST_SET = 'test-set'
+
 type SceneRow = { id: string; version: number; status: string; spec: string }
 
 const slug = '([a-z0-9]+(?:-[a-z0-9]+)*)'
@@ -183,6 +186,7 @@ async function filmOverview(db: D1Database, id: string) {
       .prepare(
         `SELECT id, episode FROM scenes s WHERE film_id = ?
          AND version = (SELECT MAX(version) FROM scenes WHERE id = s.id)
+         AND status != '${TEST_SET}'
          ORDER BY episode, id`
       )
       .bind(id)
@@ -323,14 +327,15 @@ async function createSceneVersion(
   if (spec.id !== id)
     return badRequest(`The spec id ${spec.id} does not match ${id}.`)
   // Check and insert in one statement: the episode must exist, an existing scene
-  // keeps its film and episode, and an episode holds one scene.
+  // keeps its film and episode, and an episode holds one scene (test sets aside).
   const row = await db
     .prepare(
       `INSERT INTO scenes (id, version, film_id, episode, title, status, spec)
        SELECT ?1, COALESCE((SELECT MAX(version) FROM scenes WHERE id = ?1), 0) + 1, ?2, ?3, ?4, 'draft', ?5
        WHERE EXISTS (SELECT 1 FROM episodes WHERE film_id = ?2 AND number = ?3)
          AND NOT EXISTS (SELECT 1 FROM scenes WHERE id = ?1 AND (film_id != ?2 OR episode != ?3))
-         AND NOT EXISTS (SELECT 1 FROM scenes WHERE film_id = ?2 AND episode = ?3 AND id != ?1)
+         AND NOT EXISTS (SELECT 1 FROM scenes o WHERE o.film_id = ?2 AND o.episode = ?3 AND o.id != ?1
+           AND o.version = (SELECT MAX(version) FROM scenes WHERE id = o.id) AND o.status != '${TEST_SET}')
        RETURNING version`
     )
     .bind(id, spec.film, spec.episode, spec.title, JSON.stringify(spec))
