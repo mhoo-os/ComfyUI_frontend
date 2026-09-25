@@ -19,7 +19,7 @@ const assetRef = z
     /^(?:mhoo-media:[\w/.-]+|mhoo-asset:[0-9a-f-]{36}:[1-9]\d*|https:\/\/\S+|pending:[a-z0-9-]+)$/u
   )
 
-export const beatSchema = z
+const beatSchema = z
   .object({
     kind: z.enum(['anticipation', 'action', 'reaction', 'hold']),
     performance: text(400),
@@ -27,7 +27,7 @@ export const beatSchema = z
   })
   .strict()
 
-export const cameraSchema = z
+const cameraSchema = z
   .object({
     size: z.enum([
       'extreme_wide',
@@ -58,7 +58,7 @@ export const cameraSchema = z
   })
   .strict()
 
-export const referenceSchema = z
+const referenceSchema = z
   .object({
     role: z.enum([
       'identity',
@@ -87,7 +87,7 @@ const voSchema = z
   .object({ text: text(300), clean: text(300).optional() })
   .strict()
 
-export const colorStates = [
+const colorStates = [
   'warm',
   'cold',
   'gold',
@@ -197,7 +197,7 @@ export const sceneSpecSchema = z
   })
 
 export type ShotSpec = z.infer<typeof shotSpecSchema>
-export type SceneSpec = z.infer<typeof sceneSpecSchema>
+type SceneSpec = z.infer<typeof sceneSpecSchema>
 
 /** Reasons a valid shot still cannot be rendered. Empty means ready. */
 export function renderBlockers(shot: ShotSpec) {
