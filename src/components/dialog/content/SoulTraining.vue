@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { z } from 'zod'
 import { api } from '@/scripts/api'
@@ -18,6 +18,12 @@ const busy = ref(false)
 const loaded = ref(false)
 const error = ref('')
 const name = ref('Moo adult 2019 v1')
+const blocked = computed(() =>
+  attempts.value.some(
+    (attempt) =>
+      attempt.status !== 'completed' || attempt.name === name.value.trim()
+  )
+)
 async function refresh() {
   busy.value = true
   try {
@@ -52,7 +58,7 @@ async function train() {
   if (
     busy.value ||
     !loaded.value ||
-    attempts.value.length ||
+    blocked.value ||
     !assets.length ||
     !assets.every(approvedReference)
   )
@@ -60,20 +66,26 @@ async function train() {
   busy.value = true
   error.value = ''
   const attemptId = crypto.randomUUID()
-  attempts.value = [{ attemptId, name: name.value, status: 'submitting' }]
+  attempts.value = [
+    ...attempts.value,
+    { attemptId, name: name.value.trim(), status: 'submitting' }
+  ]
   try {
     const response = await api.fetchApi('/character-assets/training', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         attemptId,
-        name: name.value,
+        name: name.value.trim(),
         references: assets.map((a) => `mhoo-asset:${a.id}:${a.revision}`)
       })
     })
     const body: unknown = await response.json()
     const parsed = schema.safeParse(body)
-    if (parsed.success) attempts.value = [parsed.data]
+    if (parsed.success)
+      attempts.value = attempts.value.map((attempt) =>
+        attempt.attemptId === attemptId ? parsed.data : attempt
+      )
     if (!response.ok) error.value = t('soulTraining.failed')
   } catch {
     error.value = t('soulTraining.failed')
@@ -100,7 +112,7 @@ onMounted(() => {
         :disabled="
           busy ||
           !loaded ||
-          !!attempts.length ||
+          blocked ||
           !assets.length ||
           !assets.every(approvedReference)
         "

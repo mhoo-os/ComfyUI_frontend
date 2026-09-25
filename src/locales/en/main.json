@@ -5519,7 +5519,7 @@
   },
   "soulTraining": {
     "title": "Soul ID \u00b7 adult reference training",
-    "explanation": "Select approved photos below. Training sends these photos to Higgsfield and creates a persistent V2 character reference. Listed price: US$2.50 per training. This first-run flow submits once; refresh checks the same attempt. An uncertain submission must be reconciled before trying again.",
+    "explanation": "Select approved photos below. Training sends these photos to Higgsfield and creates a persistent V2 character reference. Listed price: US$2.50 per training. Each named training submits once; refresh checks the same attempt. Choose a new name to create another character after completed training. Active, failed or uncertain submissions must be reconciled first.",
     "name": "Character name",
     "train": "Train selected ({count}) \u00b7 paid",
     "refresh": "Check training status",
