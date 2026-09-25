@@ -11,12 +11,13 @@ const text = (max: number) => z.string().trim().min(1).max(max)
 const slug = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u)
 
 /** Reference to real media only: an archived key, an approved character
- * library token, an https URL, or a named placeholder that blocks rendering
+ * library token, an https URL, a cast member whose approved image is looked
+ * up when the scene is loaded, or a named placeholder that blocks rendering
  * until someone supplies the asset. */
 const assetRef = z
   .string()
   .regex(
-    /^(?:mhoo-media:[\w/.-]+|mhoo-asset:[0-9a-f-]{36}:[1-9]\d*|https:\/\/\S+|pending:[a-z0-9-]+)$/u
+    /^(?:mhoo-media:[\w/.-]+|mhoo-asset:[0-9a-f-]{36}:[1-9]\d*|https:\/\/\S+|cast:[a-z0-9]+(?:-[a-z0-9]+)*|pending:[a-z0-9-]+)$/u
   )
 
 const beatSchema = z

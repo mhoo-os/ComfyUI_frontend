@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { compileShot, compileTargets, isCompileTarget } from './compilers'
 import { boundedJson } from './http'
 import { renderBlockers, sceneSpecSchema } from './shotSpec'
+import type { ShotSpec } from './shotSpec'
 
 type SceneRow = { id: string; version: number; status: string; spec: string }
 
@@ -39,9 +40,59 @@ type CastRow = {
   note: string | null
 }
 
+type CastState = { status: string; source_ref: string | null }
+
+/** Replaces `cast:<id>` references with the member's approved image. An
+ * unapproved or unknown member stays a blocker, with a reason naming it. */
+function resolveCast(shot: ShotSpec, cast: Map<string, CastState>) {
+  const reasons: string[] = []
+  const resolved: ShotSpec['references'] = []
+  const checked: ShotSpec['references'] = []
+  for (const ref of shot.references) {
+    if (!ref.asset.startsWith('cast:')) {
+      resolved.push(ref)
+      checked.push(ref)
+      continue
+    }
+    const id = ref.asset.slice(5)
+    const member = cast.get(id)
+    const frame = ref.role === 'start_frame' || ref.role === 'end_frame'
+    if (
+      member?.status === 'approved' &&
+      member.source_ref &&
+      !(frame && member.source_ref.startsWith('mhoo-media:'))
+    ) {
+      const usable = { ...ref, asset: member.source_ref, approved: true }
+      resolved.push(usable)
+      checked.push(usable)
+      continue
+    }
+    reasons.push(
+      !member
+        ? `Unknown cast member ${id}.`
+        : member.status === 'approved' && member.source_ref
+          ? `Cast member ${id}'s image is archived media; a ${ref.role} needs a provider URL or character-library token.`
+          : `Cast member ${id} needs an approved image for ${ref.role}.`
+    )
+    // Compilation must still refuse this reference; readiness reports it once, above.
+    resolved.push({ ...ref, asset: `pending:cast-${id}`, approved: false })
+    checked.push({ ...ref, approved: true })
+  }
+  return {
+    shot: { ...shot, references: resolved },
+    blockers: [...reasons, ...renderBlockers({ ...shot, references: checked })]
+  }
+}
+
 /** Reads a stored scene spec, re-validates it and reports per-shot readiness.
- * The database is private owner data; nothing here submits a generation. */
-export async function loadScene(db: D1Database, id: string) {
+ * `cast:` references resolve against the film's cast, so approving a member
+ * updates readiness without a new scene version. Nothing here submits a
+ * generation. */
+export async function loadScene(
+  db: D1Database,
+  id: string,
+  castByFilm = new Map<string, Promise<Map<string, CastState>>>()
+) {
   const row = await db
     .prepare(
       'SELECT id, version, status, spec FROM scenes WHERE id = ? ORDER BY version DESC LIMIT 1'
@@ -60,15 +111,37 @@ export async function loadScene(db: D1Database, id: string) {
         (issue) => `${issue.path.join('.')}: ${issue.message}`
       )
     }
+  const usesCast = parsed.data.shots.some((shot) =>
+    shot.references.some((ref) => ref.asset.startsWith('cast:'))
+  )
+  const film = parsed.data.film
+  // One cast read per film, shared across scenes when the caller passes a cache.
+  if (usesCast && !castByFilm.has(film))
+    castByFilm.set(
+      film,
+      db
+        .prepare(
+          'SELECT id, status, source_ref FROM cast_members WHERE film_id = ?'
+        )
+        .bind(film)
+        .all<CastState & { id: string }>()
+        .then(({ results }) => new Map(results.map((m) => [m.id, m])))
+    )
+  const cast = usesCast
+    ? await (castByFilm.get(film) ??
+        Promise.resolve(new Map<string, CastState>()))
+    : new Map<string, CastState>()
+  const resolved = parsed.data.shots.map((shot) => resolveCast(shot, cast))
   return {
     id: row.id,
     version: row.version,
     status: row.status,
     valid: true as const,
     scene: parsed.data,
-    readiness: parsed.data.shots.map((shot) => ({
-      shot: shot.id,
-      blockers: renderBlockers(shot)
+    resolved: resolved.map((item) => item.shot),
+    readiness: resolved.map((item, index) => ({
+      shot: parsed.data.shots[index].id,
+      blockers: item.blockers
     }))
   }
 }
@@ -114,6 +187,7 @@ async function filmOverview(db: D1Database, id: string) {
       )
       .bind(id)
   ])
+  const castCache = new Map<string, Promise<Map<string, CastState>>>()
   return Response.json({
     id: film.id,
     title: film.title,
@@ -136,7 +210,9 @@ async function filmOverview(db: D1Database, id: string) {
             ],
             shots: []
           }
-        const scene = inEpisode[0] ? await loadScene(db, inEpisode[0].id) : null
+        const scene = inEpisode[0]
+          ? await loadScene(db, inEpisode[0].id, castCache)
+          : null
         if (!scene)
           return {
             number: episode.number,
@@ -315,7 +391,7 @@ export async function filmRoute(request: Request, env: Env, path: string) {
     version: scene.version,
     target,
     submitted: false,
-    shots: scene.scene.shots.map((shot) => {
+    shots: scene.resolved.map((shot) => {
       try {
         return compileShot(shot, target)
       } catch (error) {
