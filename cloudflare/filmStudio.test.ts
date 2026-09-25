@@ -521,6 +521,48 @@ describe('scene versions', () => {
     expect(compiled.shots[0].error).toMatch(/not ready/)
   })
 
+  it('compiles a cast start frame to the approved image, and refuses it once revoked', async () => {
+    const body = {
+      ...example,
+      shots: [
+        {
+          ...example.shots[0],
+          references: [
+            { role: 'identity', asset: 'cast:era-city' },
+            { role: 'start_frame', asset: 'cast:era-city' }
+          ]
+        },
+        example.shots[1]
+      ]
+    }
+    await call('/scenes/coffee-cart/versions', { method: 'POST', body })
+    await call('/cast/era-city/approve', {
+      method: 'POST',
+      body: { sourceRef: 'mhoo-asset:0b0c7d1e-2f3a-4b5c-8d9e-0f1a2b3c4d5e:2' }
+    })
+    const compile = async () =>
+      (
+        await read(
+          await call('/scenes/coffee-cart/compile/seedance-2.5'),
+          z.object({
+            shots: z.array(
+              z.object({
+                error: z.string().optional(),
+                inputs: z.object({ image_url: z.string() }).optional()
+              })
+            )
+          })
+        )
+      ).shots[0]
+    const ready = await compile()
+    expect(ready.error).toBeUndefined()
+    expect(ready.inputs?.image_url).toBe(
+      'mhoo-asset:0b0c7d1e-2f3a-4b5c-8d9e-0f1a2b3c4d5e:2'
+    )
+    await call('/cast/era-city/revoke', { method: 'POST' })
+    expect((await compile()).error).toMatch(/not ready/)
+  })
+
   it('refuses a cross-origin save', async () => {
     const response = await call('/scenes/coffee-cart/versions', {
       method: 'POST',
