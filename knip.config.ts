@@ -8,6 +8,10 @@ const config: KnipConfig = {
       entry: [
         '{build,scripts}/**/*.{js,ts}',
         'vitest.matrix.config.mts',
+        'cloudflare/worker.ts',
+        'public/face-detector/vision_wasm*.js',
+        'cloudflare/renderer/server.ts',
+        'cloudflare/testing/harness.ts',
         'src/assets/css/style.css',
         'src/scripts/ui/menu/index.ts',
         'src/types/index.ts',
@@ -64,6 +68,7 @@ const config: KnipConfig = {
     'xcode-select'
   ],
   ignoreDependencies: [
+    'cloudflare',
     // Weird importmap things
     '@iconify/json'
   ],

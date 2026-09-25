@@ -1,0 +1,13 @@
+{
+  "1": {
+    "class_type": "HiggsfieldCampaign",
+    "inputs": {
+      "prompt": "Edit the first portrait. Use the second portrait only as a reference for eye shape and eyelids. Preserve the first portrait's young adult age, face outline, nose, lips, hairstyle, skin tone, pose, clothing, background, and painterly style. Give the eyes a subtly more open, softly rounded almond shape and a natural visible upper-eyelid crease, matching the relaxed eyes in reference two. Keep natural eye size and spacing. Do not copy glasses, adult facial fullness, clothing, or photographic style from reference two. Return one portrait, not a character sheet.",
+      "image_url": "https://d3u0tzju9qaucj.cloudfront.net/82c17d6a-e08d-426c-ba87-9a41f04c8a96/1906446d-195b-4fd2-a51b-f19ae97115f9.png",
+      "quality": "medium",
+      "resolution": "2k",
+      "aspect_ratio": "auto",
+      "reference_image_url": "https://d3u0tzju9qaucj.cloudfront.net/82c17d6a-e08d-426c-ba87-9a41f04c8a96/15b8b98d-d2a1-4fed-9973-bb74c5d6084e.png"
+    }
+  }
+}

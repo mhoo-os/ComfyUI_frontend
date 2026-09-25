@@ -1,0 +1,140 @@
+{
+  "last_node_id": 3,
+  "last_link_id": 3,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "HiggsfieldCampaign",
+      "title": "01 · Reference → campaign keyframe",
+      "pos": [80, 120],
+      "size": [310, 430],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "image_url",
+          "type": "STRING",
+          "links": [1, 2],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "HiggsfieldCampaign"
+      },
+      "widgets_values": [
+        "Use the reference photograph to preserve the foreground blue-grey ceramic coffee cup and dark saucer and delicate latte art. Create a cinematic premium coffee campaign still: a single cup on a rich walnut table, warm low morning sunlight from the left, gentle steam, deep emerald cafe background, soft leafy bokeh, realistic porcelain and crema textures. Low three-quarter camera angle, 85mm lens, restrained amber and forest-green grade, ample negative space. No words, no logos, no extra cups, no people.",
+        "https://images.unsplash.com/photo-1509042239860-f550ce710b93?fm=jpg&w=1536&q=85",
+        "medium",
+        "1k",
+        "16:9"
+      ]
+    },
+    {
+      "id": 2,
+      "type": "HiggsfieldCampaign",
+      "title": "02 · Matching end frame",
+      "pos": [430, 120],
+      "size": [310, 430],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image_url",
+          "type": "STRING",
+          "link": 1,
+          "widget": {
+            "name": "image_url"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image_url",
+          "type": "STRING",
+          "links": [3],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "HiggsfieldCampaign"
+      },
+      "widgets_values": [
+        "Use the supplied campaign still as the exact scene reference. Preserve the same cup, handle, latte art, table, lighting and background. Move the camera gently 15 percent closer to the cup, maintaining the same angle and cup shape. A little more fine steam above the coffee. Premium photographic realism. No new objects, no text or logos.",
+        "",
+        "medium",
+        "1k",
+        "16:9"
+      ]
+    },
+    {
+      "id": 3,
+      "type": "HiggsfieldAnimate",
+      "title": "03 · First + last frame → cinematic clip",
+      "pos": [780, 120],
+      "size": [310, 430],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image_url",
+          "type": "STRING",
+          "link": 2,
+          "widget": {
+            "name": "image_url"
+          }
+        },
+        {
+          "name": "end_image_url",
+          "type": "STRING",
+          "link": 3,
+          "widget": {
+            "name": "end_image_url"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "video_url",
+          "type": "STRING",
+          "links": null,
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "HiggsfieldAnimate"
+      },
+      "widgets_values": [
+        "One continuous slow camera push from the first frame to the last frame. The blue-grey ceramic cup and latte art remain physically stable. Fine translucent steam gently curls upward and disperses. Warm morning light and soft leafy background remain consistent. Subtle cinematic parallax, smooth controlled movement, no cuts, no morphing, no spilling, no people. Quiet cafe ambience, no speech or music.",
+        4,
+        "",
+        "720p",
+        "high",
+        true,
+        ""
+      ]
+    }
+  ],
+  "links": [
+    [1, 1, 0, 2, 0, "STRING"],
+    [2, 1, 0, 3, 0, "STRING"],
+    [3, 2, 0, 3, 1, "STRING"]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.75,
+      "offset": [0, 0]
+    },
+    "reference": {
+      "creator": "Nathan Dumlao",
+      "url": "https://unsplash.com/photos/zUNs99PGDg0",
+      "license": "https://unsplash.com/license"
+    }
+  },
+  "version": 0.4
+}

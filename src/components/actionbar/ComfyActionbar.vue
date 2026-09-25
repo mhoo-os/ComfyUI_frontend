@@ -66,11 +66,15 @@
         </Button>
         <ContextMenu ref="queueContextMenu" :model="queueContextMenuItems" />
       </div>
-      <FreeTierQuota v-if="!isDocked" />
-      <PartnerNodesRunCaption v-if="!isDocked" />
+      <HiggsfieldStatus v-if="isHiggsfield" />
+      <FreeTierQuota v-if="!isDocked && !isHiggsfield" />
+      <PartnerNodesRunCaption v-if="!isDocked && !isHiggsfield" />
     </div>
 
-    <Teleport v-if="inlineProgressTarget" :to="inlineProgressTarget">
+    <Teleport
+      v-if="inlineProgressTarget && !isHiggsfield"
+      :to="inlineProgressTarget"
+    >
       <QueueInlineProgress
         :hidden="shouldHideInlineProgress"
         radius-class="rounded-xl"
@@ -81,6 +85,9 @@
 </template>
 
 <script lang="ts" setup>
+import HiggsfieldStatus from './HiggsfieldStatus.vue'
+
+const isHiggsfield = import.meta.env.VITE_HIGGSFIELD === 'true'
 import {
   useDraggable,
   useEventListener,

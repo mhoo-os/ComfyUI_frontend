@@ -1,0 +1,88 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "mhoo-comfy",
+  "main": "worker.ts",
+  "account_id": "faca04363f6ba617faedaae7d3493769",
+  "compatibility_date": "2026-09-24",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "mhoo.dev/00/comfy*",
+      "zone_name": "mhoo.dev"
+    }
+  ],
+  "vars": {
+    "PAGES_ORIGIN": "https://mhoo-comfy.pages.dev",
+    "ACCESS_TEAM_DOMAIN": "https://mhoo.cloudflareaccess.com",
+    "ACCESS_AUD": "a7cd3a8f02250d37b9795c8ce3e198a1de6ce687b68946860389bf5786f5ae05",
+    "OWNER_EMAIL": "tanyawit@mhoooo.com",
+    "PLANNER_GATEWAY_URL": "https://gateway.ai.cloudflare.com/v1/faca04363f6ba617faedaae7d3493769/default"
+  },
+  "kv_namespaces": [
+    {
+      "binding": "COMFY_STATE",
+      "id": "805c3afa080640e1a271ab75932c2278"
+    }
+  ],
+  "secrets_store_secrets": [
+    {
+      "binding": "HF_CREDENTIALS",
+      "store_id": "c3986cf43eea48beb904549dd8d574ac",
+      "secret_name": "HF_CREDENTIALS"
+    },
+    {
+      "binding": "PLANNER_GATEWAY_AUTH",
+      "store_id": "c3986cf43eea48beb904549dd8d574ac",
+      "secret_name": "mhoo_workbench_cf_aig_token"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "COMFY_JOBS",
+        "class_name": "ComfyJobs"
+      },
+      {
+        "name": "COMFY_RENDERER",
+        "class_name": "ComfyRenderer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["ComfyJobs"]
+    },
+    {
+      "tag": "v2-renderer",
+      "new_sqlite_classes": ["ComfyRenderer"]
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "r2_buckets": [
+    {
+      "binding": "COMFY_MEDIA",
+      "bucket_name": "mhoo-comfy-media"
+    }
+  ],
+  "containers": [
+    {
+      "class_name": "ComfyRenderer",
+      "image": "./renderer/Dockerfile",
+      "instance_type": "standard-2",
+      "max_instances": 1
+    }
+  ],
+  "workflows": [
+    {
+      "binding": "COMFY_PRODUCTION",
+      "name": "mhoo-comfy-production",
+      "class_name": "ComfyProduction"
+    }
+  ]
+}

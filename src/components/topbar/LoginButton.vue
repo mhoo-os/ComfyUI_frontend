@@ -1,6 +1,6 @@
 <template>
   <Button
-    v-if="!isLoggedIn"
+    v-if="!isLoggedIn && !isHiggsfield"
     data-testid="login-button"
     variant="textonly"
     size="icon"
@@ -50,6 +50,7 @@ const { class: className } = defineProps<{
   class?: HTMLAttributes['class']
 }>()
 
+const isHiggsfield = import.meta.env.VITE_HIGGSFIELD === 'true'
 const { t } = useI18n()
 const { isLoggedIn, handleSignIn } = useCurrentUser()
 const { buildDocsUrl } = useExternalLink()

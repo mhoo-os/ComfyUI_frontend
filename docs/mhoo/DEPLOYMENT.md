@@ -1,0 +1,61 @@
+# Deployment and operation
+
+Repository: `mhoo-os/ComfyUI_frontend`. Owner entry: https://mhoo.dev/00/comfy/.
+
+## Build and release
+
+Use the upstream pinned pnpm version and Node engine from `package.json`.
+
+```sh
+pnpm install --frozen-lockfile
+pnpm build:higgsfield
+pnpm test:higgsfield
+pnpm typecheck:higgsfield
+pnpm lint
+pnpm exec knip
+pnpm deploy:higgsfield:assets
+pnpm deploy:higgsfield:api
+```
+
+`build:higgsfield` keeps the normal upstream build and enables the starter workflow, native upload/estimate controls and provider status under `VITE_HIGGSFIELD=true`. Pages hosts `dist/`; its production branch is `main` for direct asset deployment. The Worker config is `cloudflare/wrangler.jsonc`. The route uses existing `/00/*` Access protection, verifies the JWT audience/issuer and owner email, and rejects cross-origin mutations. No provider keys belong in Vite variables or frontend code.
+
+Regenerate binding declarations after configuration changes:
+
+```sh
+pnpm exec wrangler types cloudflare/worker-configuration.d.ts --config cloudflare/wrangler.jsonc --include-runtime=false
+```
+
+## Adapter
+
+`cloudflare/models.json` records selected fields from official model-specific schemas. `graph.ts` validates the entire graph before any paid submission. The job Durable Object serializes the owner queue, persists request IDs, polls through alarms and publishes native ComfyUI events. A cancel request marks durable intent; the alarm owns provider transitions. The single-owner UI uses native ComfyUI `/jobs`, `/object_info`, `/prompt`, `/userdata`, `/settings`, `/view` and WebSocket contracts.
+
+Provider request IDs and last polling errors are visible in authenticated job details. No provider response headers or credentials are returned. Successful empty cancellation responses are handled without JSON parsing. Creating a generation is never automatically retried, including on ambiguous transport failure.
+
+The runtime tests use isolated Miniflare storage and a simulated provider with test-only credentials. They do not reach Higgsfield or spend credits.
+
+## Rollback
+
+List the Worker deployment versions with `pnpm exec wrangler versions list --config cloudflare/wrangler.jsonc`, inspect the intended version, and use Wrangler rollback for a confirmed prior deployment. Pages retains separate deployments; redeploy a known-good matching `dist/` build. Do not delete the Durable Object namespace, KV namespace or R2 bucket during rollback: they contain workflows and paid job state.
+
+## Limitations
+
+See [CAPABILITY-GAPS.md](CAPABILITY-GAPS.md). This is an owner-only iterative release, not a full ComfyUI execution server. The initial local build passed on Node 24.16.0 with the upstream Node 26 engine warning; use the declared engine in CI/future reproducible environments. Lint passes with upstream warnings.
+
+## Media and reference workflows
+
+Marketing Studio accepts `image_url` (primary) and optional
+`reference_image_url` (secondary). The adapter validates both and sends them in
+that order as the provider's `image_urls` array. Both accept an image node's URL
+output or an approved private reference token. Existing workflows can omit the
+secondary input. Reload the app and create a new Marketing Studio node to see
+the new field; existing saved nodes do not automatically gain widgets.
+
+`workflows/moo-portrait-eye-edit-api.json` is a one-node API graph for the
+portrait-to-portrait eye edit, not a canvas-format workflow. Obtain a fresh
+estimate before submission; it has not been generated.
+
+`COMFY_MEDIA` binds the private `mhoo-comfy-media` R2 bucket. There is no public bucket domain. New output media is archived before advancing to the next model; byte ranges are served through authenticated `/view`. Keep provider URLs for downstream inference and recovery. Paid result URLs are saved before archival and never resubmitted because storage failed. Old outputs are not automatically backfilled.
+
+Native image upload buttons send a bounded image body to `/api/higgsfield/upload`. The Worker obtains the presigned URL with its secret, then sends only the returned upload headers to storage. Credentials and presigned upload URLs are never sent to the client. Upload input retention follows the provider; important original files should be retained separately.
+
+Import `docs/mhoo/workflows/coffee-campaign.json` for the three-node reference→keyframe→end-frame→video demonstration. Run is billable; use native per-node estimates first. Account discounts and token-metered video prices can change.

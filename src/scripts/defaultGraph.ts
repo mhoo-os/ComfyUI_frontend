@@ -1,5 +1,7 @@
 import type { ComfyWorkflowJSON } from '@/platform/workflow/validation/schemas/workflowSchema'
 
+import { higgsfieldDefaultGraph } from './higgsfieldDefaultGraph'
+
 const testDefaultGraph: ComfyWorkflowJSON = {
   last_node_id: 9,
   last_link_id: 9,
@@ -557,9 +559,11 @@ const prodDefaultGraph: ComfyWorkflowJSON = {
 }
 
 export const defaultGraph: ComfyWorkflowJSON =
-  import.meta.env.VITE_USE_LEGACY_DEFAULT_GRAPH === 'true'
-    ? testDefaultGraph
-    : prodDefaultGraph
+  import.meta.env.VITE_HIGGSFIELD === 'true'
+    ? higgsfieldDefaultGraph
+    : import.meta.env.VITE_USE_LEGACY_DEFAULT_GRAPH === 'true'
+      ? testDefaultGraph
+      : prodDefaultGraph
 
 export const defaultGraphJSON = JSON.stringify(defaultGraph)
 

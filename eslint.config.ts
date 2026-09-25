@@ -171,11 +171,18 @@ const primeVueRemovalPlugin = {
 
 export default defineConfig([
   {
+    files: ['cloudflare/**/*.ts'],
+    settings: { 'import-x/core-modules': ['cloudflare:workers'] }
+  },
+  {
     ignores: [
       '**/vite.config.*.timestamp*',
       '**/vitest.config.*.timestamp*',
       'components.d.ts',
+      'cloudflare/worker-configuration.d.ts',
       'coverage/*',
+      '**/.wrangler/**',
+      'public/face-detector/vision_wasm*.js',
       'dist/*',
       'apps/*/dist/**',
       'apps/*/.astro/**',
