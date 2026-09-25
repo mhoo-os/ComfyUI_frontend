@@ -79,12 +79,12 @@ jobs:
 
           # Require every E2E container to use the same static image.
           mapfile -t images < <(
-            grep -oE "^[[:space:]]*image:[[:space:]]*['\"]?ghcr\.io/comfy-org/comfyui-ci-container:[A-Za-z0-9._-]+" "$e2e_workflow" |
-              grep -oE 'ghcr\.io/comfy-org/comfyui-ci-container:[A-Za-z0-9._-]+' |
+            grep -oE "^[[:space:]]*image:[[:space:]]*['\"]?(ghcr\.io/comfy-org/comfyui-ci-container|mcr\.microsoft\.com/playwright):[A-Za-z0-9._-]+" "$e2e_workflow" |
+              grep -oE '(ghcr\.io/comfy-org/comfyui-ci-container|mcr\.microsoft\.com/playwright):[A-Za-z0-9._-]+' |
               sort -u
           )
           if [ "${#images[@]}" -ne 1 ]; then
-            echo "::error::Expected exactly one comfyui-ci-container image across the container jobs in ${e2e_workflow}, found ${#images[@]}: ${images[*]:-none}"
+            echo "::error::Expected exactly one supported CI image across the container jobs in ${e2e_workflow}, found ${#images[@]}: ${images[*]:-none}"
             exit 1
           fi
 
@@ -134,9 +134,6 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ${{ needs.setup.outputs.container-image }}
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
     permissions:
       contents: read
       packages: read

@@ -1,5 +1,5 @@
 name: Start ComfyUI Server
-description: 'Start ComfyUI server in a container environment (assumes ComfyUI is pre-installed)'
+description: 'Prepare and start ComfyUI in a Playwright or prebuilt ComfyUI container'
 
 inputs:
   front_end_root:
@@ -14,6 +14,23 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: Install ComfyUI when using the public Playwright image
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ ! -d /ComfyUI ]; then
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git python3-venv fonts-dejavu-core fonts-noto-core fonts-noto-cjk fonts-ubuntu
+          git clone --depth 1 --branch v0.30.0 https://github.com/Comfy-Org/ComfyUI.git /ComfyUI
+          python3 -m venv /opt/venv
+          /opt/venv/bin/pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          /opt/venv/bin/pip install -r /ComfyUI/requirements.txt wait-for-it
+          mkdir -p /ComfyUI/custom_nodes/ComfyUI_devtools
+        fi
+        echo /opt/venv/bin >> "$GITHUB_PATH"
+        echo VIRTUAL_ENV=/opt/venv >> "$GITHUB_ENV"
+
     - name: Copy devtools and start server
       shell: bash
       run: |
