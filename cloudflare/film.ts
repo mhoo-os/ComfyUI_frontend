@@ -269,7 +269,10 @@ async function createSceneVersion(
     .prepare('SELECT film_id, episode FROM scenes WHERE id = ? LIMIT 1')
     .bind(id)
     .first<{ film_id: string; episode: number }>()
-  if (existing)
+  if (
+    existing &&
+    (existing.film_id !== spec.film || existing.episode !== spec.episode)
+  )
     return Response.json(
       {
         error: `Scene ${id} belongs to ${existing.film_id} episode ${existing.episode}; a new version can't move it.`

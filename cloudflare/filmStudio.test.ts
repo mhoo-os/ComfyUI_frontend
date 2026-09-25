@@ -392,6 +392,46 @@ describe('scene versions', () => {
     ])
   })
 
+  it('starts a brand-new scene at version 1', async () => {
+    const fresh = { ...example, id: 'new-cart', episode: 2 }
+    const response = await call('/scenes/new-cart/versions', {
+      method: 'POST',
+      body: fresh
+    })
+    expect(await response.json()).toEqual({ id: 'new-cart', version: 1 })
+  })
+
+  it('reports legacy duplicate scenes in an episode instead of hiding one', async () => {
+    const db = await mf.getD1Database('FILM_DB')
+    await db
+      .prepare(
+        "INSERT INTO scenes (id, version, film_id, episode, title, spec) VALUES ('old-cart', 1, 'example-film', 1, 'Old', ?)"
+      )
+      .bind(JSON.stringify({ ...example, id: 'old-cart' }))
+      .run()
+    const film = await read(
+      await call('/films/example-film'),
+      z.object({
+        episodes: z.array(
+          z.object({
+            status: z.string(),
+            issues: z.array(z.string()).optional()
+          })
+        )
+      })
+    )
+    expect(film.episodes[0]).toMatchObject({ status: 'invalid' })
+    expect(film.episodes[0].issues?.[0]).toMatch(/2 scenes/)
+    const save = await call('/scenes/coffee-cart/versions', {
+      method: 'POST',
+      body: example
+    })
+    expect(save.status).toBe(409)
+    expect((await read(save, z.object({ error: z.string() }))).error).toMatch(
+      /already has a scene/
+    )
+  })
+
   it('refuses a cross-origin save', async () => {
     const response = await call('/scenes/coffee-cart/versions', {
       method: 'POST',
