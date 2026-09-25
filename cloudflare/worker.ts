@@ -2,6 +2,7 @@ import { createRemoteJWKSet, jwtVerify } from 'jose'
 import { z } from 'zod'
 
 import { compileTalkingShot, talkingShotSchema } from './talkingShot'
+import { filmRoute } from './film'
 import { routeShot, expandShot } from './planner'
 import { models, nodeDefinitions } from './graph'
 import { boundedJson, json } from './jobs'
@@ -74,6 +75,10 @@ export default {
             'No Higgsfield generation was submitted.'
           ]
         })
+      }
+      if (path.startsWith('/film/')) {
+        const film = await filmRoute(request, env, path)
+        if (film) return film
       }
       if (path === '/object_info') return json(nodeDefinitions())
       if (path === '/features') return json({})
