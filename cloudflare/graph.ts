@@ -145,7 +145,14 @@ export function planGraph(value: unknown): { graph: Graph; order: string[] } {
       if (Array.isArray(value)) {
         if (value[1] !== 0)
           throw new Error('Only the URL output (slot 0) can be connected.')
-        if (!['prompt', 'image_url', 'end_image_url'].includes(key))
+        if (
+          ![
+            'prompt',
+            'image_url',
+            'end_image_url',
+            'reference_image_url'
+          ].includes(key)
+        )
           throw new Error('Connect URLs only to text or image URL inputs.')
         visit(value[0])
         if (
@@ -233,7 +240,7 @@ export function resolveInputs(
       typeof value === 'string' &&
       value.includes('mhoo-asset:') &&
       !(
-        ['image_url', 'end_image_url'].includes(key) &&
+        ['image_url', 'end_image_url', 'reference_image_url'].includes(key) &&
         referenceToken.test(value)
       )
     )
@@ -241,7 +248,7 @@ export function resolveInputs(
     if (
       key.endsWith('_url') &&
       !(
-        ['image_url', 'end_image_url'].includes(key) &&
+        ['image_url', 'end_image_url', 'reference_image_url'].includes(key) &&
         referenceToken.test(String(value))
       )
     ) {
@@ -255,7 +262,14 @@ export function resolveInputs(
       )
         throw new Error('Media inputs must use public HTTPS URLs.')
     }
-    input[prop.providerField ?? key] = prop.asArray ? [String(value)] : value
+    const field = prop.providerField ?? key
+    if (prop.asArray) {
+      const previous = input[field]
+      input[field] = [
+        ...(Array.isArray(previous) ? previous : []),
+        String(value)
+      ]
+    } else input[field] = value
   }
   if (node.class_type === 'HiggsfieldSoul' && input.custom_reference_id)
     z.number().positive().max(1).parse(input.custom_reference_strength)

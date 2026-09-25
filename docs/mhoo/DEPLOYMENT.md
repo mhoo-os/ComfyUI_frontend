@@ -43,6 +43,17 @@ See [CAPABILITY-GAPS.md](CAPABILITY-GAPS.md). This is an owner-only iterative re
 
 ## Media and reference workflows
 
+Marketing Studio accepts `image_url` (primary) and optional
+`reference_image_url` (secondary). The adapter validates both and sends them in
+that order as the provider's `image_urls` array. Both accept an image node's URL
+output or an approved private reference token. Existing workflows can omit the
+secondary input. Reload the app and create a new Marketing Studio node to see
+the new field; existing saved nodes do not automatically gain widgets.
+
+`workflows/moo-portrait-eye-edit-api.json` is a one-node API graph for the
+portrait-to-portrait eye edit, not a canvas-format workflow. Obtain a fresh
+estimate before submission; it has not been generated.
+
 `COMFY_MEDIA` binds the private `mhoo-comfy-media` R2 bucket. There is no public bucket domain. New output media is archived before advancing to the next model; byte ranges are served through authenticated `/view`. Keep provider URLs for downstream inference and recovery. Paid result URLs are saved before archival and never resubmitted because storage failed. Old outputs are not automatically backfilled.
 
 Native image upload buttons send a bounded image body to `/api/higgsfield/upload`. The Worker obtains the presigned URL with its secret, then sends only the returned upload headers to storage. Credentials and presigned upload URLs are never sent to the client. Upload input retention follows the provider; important original files should be retained separately.

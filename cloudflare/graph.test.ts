@@ -8,6 +8,37 @@ const image = {
   inputs: { prompt: 'A mountain lake' }
 }
 describe('Higgsfield workflow boundary', () => {
+  it('preserves ordered campaign references and legacy single-image inputs', () => {
+    const inputs = {
+      prompt: 'Edit eyes',
+      image_url: 'https://cdn.example.com/actor.png'
+    }
+    const node = { class_type: 'HiggsfieldCampaign', inputs }
+    expect(resolveInputs(node, {}).image_urls).toEqual([inputs.image_url])
+    const plan = planGraph({
+      actor: image,
+      edit: {
+        ...node,
+        inputs: { ...inputs, reference_image_url: ['actor', 0] }
+      }
+    })
+    expect(
+      resolveInputs(plan.graph.edit, {
+        actor: [{ url: 'https://cdn.example.com/eyes.png', kind: 'image' }]
+      }).image_urls
+    ).toEqual([inputs.image_url, 'https://cdn.example.com/eyes.png'])
+    expect(() =>
+      planGraph({
+        edit: {
+          ...node,
+          inputs: {
+            ...inputs,
+            reference_image_url: 'http://localhost/private.png'
+          }
+        }
+      })
+    ).toThrow('public HTTPS')
+  })
   it('orders connected image generation before animation and resolves the returned URL', () => {
     const animation = {
       class_type: 'HiggsfieldAnimate',

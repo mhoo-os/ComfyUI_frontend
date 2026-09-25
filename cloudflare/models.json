@@ -205,6 +205,12 @@
             "21:9"
           ],
           "default": "auto"
+        },
+        "reference_image_url": {
+          "type": "string",
+          "format": "uri",
+          "providerField": "image_urls",
+          "asArray": true
         }
       },
       "required": ["prompt"]
@@ -249,6 +255,40 @@
       },
       "required": ["scene", "dialogue"],
       "additionalProperties": false
+    }
+  },
+  "HiggsfieldKlingDraft": {
+    "title": "Kling 2.5 Turbo Standard · Draft Video",
+    "endpoint": "kling-video/v2.5-turbo/standard/image-to-video",
+    "kind": "video",
+    "source": "https://open.higgsfield.ai/models/kling-video/v2.5-turbo/standard/image-to-video/api-reference",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string"
+        },
+        "image_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "duration": {
+          "type": "integer",
+          "enum": [5, 10],
+          "default": 5
+        },
+        "cfg_scale": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.5
+        },
+        "negative_prompt": {
+          "type": "string",
+          "default": ""
+        }
+      },
+      "required": ["prompt", "image_url"]
     }
   }
 }

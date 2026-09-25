@@ -77,6 +77,41 @@ async function jobs(mf: Miniflare) {
 }
 
 describe('Durable workflow lifecycle', () => {
+  it('persists provider failure details without submitting again', async () => {
+    let submissions = 0
+    const mf = await runtime(async (request) => {
+      if (request.method === 'POST') {
+        submissions++
+        return Response.json({ request_id: requestId, status: 'queued' })
+      }
+      return Response.json(
+        {
+          request_id: requestId,
+          status: 'failed',
+          error: 'Input image decoder failed'
+        },
+        {
+          headers: { 'X-Correlation-ID': 'trace-failed' }
+        }
+      )
+    })
+    await queue(mf)
+    await tick(mf)
+    await tick(mf)
+    expect(submissions).toBe(1)
+    expect(await jobs(mf)).toMatchObject({
+      jobs: [
+        {
+          status: 'failed',
+          execution_error: {
+            exception_message:
+              'Higgsfield returned failed. Input image decoder failed [correlation: trace-failed]'
+          }
+        }
+      ]
+    })
+  })
+
   it('submits once, keeps polling and returns all completed media in history', async () => {
     let submissions = 0
     let polls = 0

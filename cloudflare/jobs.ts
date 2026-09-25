@@ -9,7 +9,12 @@ import { models, planGraph, resolveInputs } from './graph'
 import type { Graph, Media } from './graph'
 import { archiveMedia, readMedia } from './media'
 import { talkingShotSchema } from './talkingShot'
-import { provider, resultMedia, resultSchema } from './provider'
+import {
+  provider,
+  providerFailure,
+  resultMedia,
+  resultSchema
+} from './provider'
 
 const submissionSchema = z.object({
   prompt: z.unknown(),
@@ -714,7 +719,7 @@ export class ComfyJobs extends DurableObject<Env> {
         await this.finish(
           job,
           result.status === 'canceled' ? 'cancelled' : 'failed',
-          `Higgsfield returned ${result.status}.`
+          providerFailure(result)
         )
         return
       }
