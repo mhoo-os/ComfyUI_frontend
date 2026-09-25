@@ -1,6 +1,7 @@
 import { createReadStream } from 'node:fs'
 import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
@@ -131,8 +132,8 @@ const server = createServer(async (request, response) => {
   }
 })
 async function frames(
-  request: import('node:http').IncomingMessage,
-  response: import('node:http').ServerResponse,
+  request: IncomingMessage,
+  response: ServerResponse,
   url: URL
 ) {
   if (busy) {
