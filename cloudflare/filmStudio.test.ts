@@ -493,7 +493,9 @@ describe('scene versions', () => {
           references: [
             { role: 'identity', asset: 'cast:anchor-young' },
             { role: 'start_frame', asset: 'cast:anchor-young' },
-            { role: 'setting', asset: 'pending:anchor-young' }
+            { role: 'setting', asset: 'pending:anchor-young' },
+            { role: 'costume', asset: 'cast:friend' },
+            { role: 'costume', asset: 'pending:cast-friend' }
           ]
         },
         example.shots[1]
@@ -508,8 +510,15 @@ describe('scene versions', () => {
     )
     expect(scene.readiness[0].blockers).toEqual([
       "Cast member anchor-young's image is archived media; a start_frame needs a provider URL or character-library token.",
-      'Missing setting asset anchor-young.'
+      'Cast member friend needs an approved image for costume.',
+      'Missing setting asset anchor-young.',
+      'Missing costume asset cast-friend.'
     ])
+    const compiled = await read(
+      await call('/scenes/coffee-cart/compile/seedance-2.5'),
+      z.object({ shots: z.array(z.object({ error: z.string().optional() })) })
+    )
+    expect(compiled.shots[0].error).toMatch(/not ready/)
   })
 
   it('refuses a cross-origin save', async () => {

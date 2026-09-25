@@ -45,9 +45,15 @@ type CastState = { status: string; source_ref: string | null }
 /** Replaces `cast:<id>` references with the member's approved image. An
  * unapproved or unknown member stays a blocker, with a reason naming it. */
 function resolveCast(shot: ShotSpec, cast: Map<string, CastState>) {
-  const reasons = new Map<string, string>()
-  const references = shot.references.map((ref) => {
-    if (!ref.asset.startsWith('cast:')) return ref
+  const reasons: string[] = []
+  const resolved: ShotSpec['references'] = []
+  const checked: ShotSpec['references'] = []
+  for (const ref of shot.references) {
+    if (!ref.asset.startsWith('cast:')) {
+      resolved.push(ref)
+      checked.push(ref)
+      continue
+    }
     const id = ref.asset.slice(5)
     const member = cast.get(id)
     const frame = ref.role === 'start_frame' || ref.role === 'end_frame'
@@ -55,25 +61,26 @@ function resolveCast(shot: ShotSpec, cast: Map<string, CastState>) {
       member?.status === 'approved' &&
       member.source_ref &&
       !(frame && member.source_ref.startsWith('mhoo-media:'))
-    )
-      return { ...ref, asset: member.source_ref, approved: true }
-    // A distinct placeholder keeps these reasons apart from ordinary pending: assets.
-    reasons.set(
-      `Missing ${ref.role} asset cast-${id}.`,
+    ) {
+      const usable = { ...ref, asset: member.source_ref, approved: true }
+      resolved.push(usable)
+      checked.push(usable)
+      continue
+    }
+    reasons.push(
       !member
         ? `Unknown cast member ${id}.`
         : member.status === 'approved' && member.source_ref
           ? `Cast member ${id}'s image is archived media; a ${ref.role} needs a provider URL or character-library token.`
           : `Cast member ${id} needs an approved image for ${ref.role}.`
     )
-    return { ...ref, asset: `pending:cast-${id}`, approved: false }
-  })
-  const resolved = { ...shot, references }
+    // Compilation must still refuse this reference; readiness reports it once, above.
+    resolved.push({ ...ref, asset: `pending:cast-${id}`, approved: false })
+    checked.push({ ...ref, approved: true })
+  }
   return {
-    shot: resolved,
-    blockers: renderBlockers(resolved).map(
-      (blocker) => reasons.get(blocker) ?? blocker
-    )
+    shot: { ...shot, references: resolved },
+    blockers: [...reasons, ...renderBlockers({ ...shot, references: checked })]
   }
 }
 
