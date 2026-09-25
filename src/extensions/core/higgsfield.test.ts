@@ -17,7 +17,7 @@ class ReferenceNode extends LGraphNode {
 }
 
 describe('Higgsfield native node controls', () => {
-  it('adds upload and estimate controls before registration sets the node type, without serializing buttons into provider inputs', async () => {
+  it('adds reference library, upload and estimate controls before registration sets the node type, without serializing buttons into provider inputs', async () => {
     const node = new ReferenceNode('Reference')
     node.addWidget(
       'text',
@@ -30,7 +30,11 @@ describe('Higgsfield native node controls', () => {
       node.widgets
         ?.filter((widget) => widget.type === 'button')
         .map((widget) => widget.name)
-    ).toEqual(['higgsfield.upload', 'higgsfield.estimate'])
+    ).toEqual([
+      'referenceLibrary.title',
+      'higgsfield.upload',
+      'higgsfield.estimate'
+    ])
     node.comfyClass = 'HiggsfieldCampaign'
     const graph = new LGraph()
     graph.add(node)
