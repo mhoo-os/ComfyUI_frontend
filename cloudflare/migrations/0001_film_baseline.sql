@@ -1,5 +1,6 @@
 -- Baseline of the tables that already exist in mhoo-film, created before this repo kept
--- migrations. IF NOT EXISTS makes this a no-op on the live database and builds a fresh local one.
+-- migrations. Matches the live sqlite_master definitions as of 2026-09-25. IF NOT EXISTS makes
+-- this a no-op on the live database and builds a fresh local one.
 CREATE TABLE IF NOT EXISTS films (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,

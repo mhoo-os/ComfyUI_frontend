@@ -236,6 +236,22 @@ describe('cast', () => {
     ).toBe(404)
   })
 
+  it('keeps a newer source when a later approval sends none', async () => {
+    const replacement = 'mhoo-media:outputs/job-2/4/1'
+    await call('/cast/anchor-young/approve', {
+      method: 'POST',
+      body: { sourceRef: replacement }
+    })
+    const again = await call('/cast/anchor-young/approve', {
+      method: 'POST',
+      body: {}
+    })
+    expect(await again.json()).toMatchObject({
+      status: 'approved',
+      sourceRef: replacement
+    })
+  })
+
   it.for([
     { case: 'no origin', from: null, as: undefined },
     { case: 'another origin', from: 'https://evil.test', as: undefined },
@@ -329,6 +345,51 @@ describe('scene versions', () => {
     expect(
       (await call(`/scenes/${path}/versions`, { method: 'POST', body })).status
     ).toBe(status)
+  })
+
+  it.for([
+    {
+      case: 'move to another episode',
+      path: 'coffee-cart',
+      body: { ...example, episode: 2 },
+      status: 409,
+      error: /can't move it/
+    },
+    {
+      case: 'add a second scene to an episode',
+      path: 'second-cart',
+      body: { ...example, id: 'second-cart' },
+      status: 409,
+      error: /already has a scene/
+    },
+    {
+      case: 'use an episode that does not exist',
+      path: 'late-cart',
+      body: { ...example, id: 'late-cart', episode: 99 },
+      status: 404,
+      error: /Episode 99/
+    }
+  ])('refuses to $case', async ({ path, body, status, error }) => {
+    const response = await call(`/scenes/${path}/versions`, {
+      method: 'POST',
+      body
+    })
+    expect(response.status).toBe(status)
+    expect(
+      (await read(response, z.object({ error: z.string() }))).error
+    ).toMatch(error)
+    const film = await read(
+      await call('/films/example-film'),
+      z.object({
+        episodes: z.array(
+          z.object({ status: z.string(), scene: z.string().nullable() })
+        )
+      })
+    )
+    expect(film.episodes.map((episode) => episode.scene)).toEqual([
+      'coffee-cart',
+      ...Array(7).fill(null)
+    ])
   })
 
   it('refuses a cross-origin save', async () => {

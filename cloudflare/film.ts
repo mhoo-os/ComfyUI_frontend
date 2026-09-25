@@ -90,8 +90,8 @@ const badRequest = (error: string, issues?: string[]) =>
 const notFound = (what: string) =>
   Response.json({ error: `${what} not found.` }, { status: 404 })
 
-/** The film with every episode's breakdown state. Spend is summed from render
- * receipts only; there are none until the render slice, so it is 0. */
+/** The film with every episode's breakdown state. Spend will come from render
+ * receipts; none exist until the render slice, so it is reported as 0. */
 async function filmOverview(db: D1Database, id: string) {
   const film = await db
     .prepare('SELECT id, title, status FROM films WHERE id = ?')
@@ -108,7 +108,9 @@ async function filmOverview(db: D1Database, id: string) {
       .bind(id),
     db
       .prepare(
-        'SELECT DISTINCT id, episode FROM scenes WHERE film_id = ? ORDER BY episode, id'
+        `SELECT id, episode FROM scenes s WHERE film_id = ?
+         AND version = (SELECT MAX(version) FROM scenes WHERE id = s.id)
+         ORDER BY episode, id`
       )
       .bind(id)
   ])
@@ -119,10 +121,22 @@ async function filmOverview(db: D1Database, id: string) {
     spend: { total: 0, currency: 'USD', receipts: 0 },
     episodes: await Promise.all(
       episodes.map(async (episode) => {
-        const sceneId = scenes.find(
+        const inEpisode = scenes.filter(
           (scene) => scene.episode === episode.number
-        )?.id
-        const scene = sceneId ? await loadScene(db, sceneId) : null
+        )
+        // Saving keeps one scene per episode; older data that breaks that is reported, not hidden.
+        if (inEpisode.length > 1)
+          return {
+            number: episode.number,
+            title: episode.title,
+            status: 'invalid',
+            scene: inEpisode[0].id,
+            issues: [
+              `Episode has ${inEpisode.length} scenes: ${inEpisode.map((scene) => scene.id).join(', ')}.`
+            ],
+            shots: []
+          }
+        const scene = inEpisode[0] ? await loadScene(db, inEpisode[0].id) : null
         if (!scene)
           return {
             number: episode.number,
@@ -187,34 +201,32 @@ async function setCastStatus(
     return badRequest(
       'Use { "sourceRef": "mhoo-media:outputs/<job>/<node>/<i>" } or a character-library token.'
     )
-  const row = await db
-    .prepare('SELECT * FROM cast_members WHERE id = ?')
+  // One statement per decision, so overlapping requests can't write back a stale source.
+  const updated =
+    action === 'revoke'
+      ? await db
+          .prepare(
+            "UPDATE cast_members SET status = 'revoked', approved_at = NULL WHERE id = ? RETURNING *"
+          )
+          .bind(id)
+          .first<CastRow>()
+      : await db
+          .prepare(
+            `UPDATE cast_members
+             SET status = 'approved', source_ref = COALESCE(?1, source_ref), approved_at = datetime('now')
+             WHERE id = ?2 AND (kind != 'era_look' OR COALESCE(?1, source_ref) IS NOT NULL)
+             RETURNING *`
+          )
+          .bind(body.data.sourceRef ?? null, id)
+          .first<CastRow>()
+  if (updated) return Response.json(castMember(updated))
+  const exists = await db
+    .prepare('SELECT id FROM cast_members WHERE id = ?')
     .bind(id)
-    .first<CastRow>()
-  if (!row) return notFound('Cast member')
-  if (action === 'revoke')
-    await db
-      .prepare(
-        "UPDATE cast_members SET status = 'revoked', approved_at = NULL WHERE id = ?"
-      )
-      .bind(id)
-      .run()
-  else {
-    const source = body.data.sourceRef ?? row.source_ref
-    if (row.kind === 'era_look' && !source)
-      return badRequest('An era look needs a source image before approval.')
-    await db
-      .prepare(
-        "UPDATE cast_members SET status = 'approved', source_ref = ?, approved_at = datetime('now') WHERE id = ?"
-      )
-      .bind(source, id)
-      .run()
-  }
-  const updated = await db
-    .prepare('SELECT * FROM cast_members WHERE id = ?')
-    .bind(id)
-    .first<CastRow>()
-  return Response.json(updated ? castMember(updated) : null)
+    .first()
+  return exists
+    ? badRequest('An era look needs a source image before approval.')
+    : notFound('Cast member')
 }
 
 /** Stores a new scene version. Existing versions are never updated in place. */
@@ -234,31 +246,40 @@ async function createSceneVersion(
   const spec = parsed.data
   if (spec.id !== id)
     return badRequest(`The spec id ${spec.id} does not match ${id}.`)
-  const film = await db
-    .prepare('SELECT id FROM films WHERE id = ?')
-    .bind(spec.film)
+  // Check and insert in one statement: the episode must exist, an existing scene
+  // keeps its film and episode, and an episode holds one scene.
+  const row = await db
+    .prepare(
+      `INSERT INTO scenes (id, version, film_id, episode, title, status, spec)
+       SELECT ?1, COALESCE((SELECT MAX(version) FROM scenes WHERE id = ?1), 0) + 1, ?2, ?3, ?4, 'draft', ?5
+       WHERE EXISTS (SELECT 1 FROM episodes WHERE film_id = ?2 AND number = ?3)
+         AND NOT EXISTS (SELECT 1 FROM scenes WHERE id = ?1 AND (film_id != ?2 OR episode != ?3))
+         AND NOT EXISTS (SELECT 1 FROM scenes WHERE film_id = ?2 AND episode = ?3 AND id != ?1)
+       RETURNING version`
+    )
+    .bind(id, spec.film, spec.episode, spec.title, JSON.stringify(spec))
+    .first<{ version: number }>()
+  if (row) return Response.json({ id, version: row.version }, { status: 201 })
+  const episode = await db
+    .prepare('SELECT 1 FROM episodes WHERE film_id = ? AND number = ?')
+    .bind(spec.film, spec.episode)
     .first()
-  if (!film) return notFound('Film')
-  try {
-    const row = await db
-      .prepare(
-        `INSERT INTO scenes (id, version, film_id, episode, title, status, spec)
-         SELECT ?, COALESCE(MAX(version), 0) + 1, ?, ?, ?, 'draft', ?
-         FROM scenes WHERE id = ?
-         RETURNING version`
-      )
-      .bind(id, spec.film, spec.episode, spec.title, JSON.stringify(spec), id)
-      .first<{ version: number }>()
-    return Response.json({ id, version: row?.version }, { status: 201 })
-  } catch (error) {
-    // Two saves raced for the same version number; the other one won.
-    if (error instanceof Error && /UNIQUE|PRIMARY KEY/u.test(error.message))
-      return Response.json(
-        { error: 'Another version was saved at the same time. Retry.' },
-        { status: 409 }
-      )
-    throw error
-  }
+  if (!episode) return notFound(`Episode ${spec.episode} of ${spec.film}`)
+  const existing = await db
+    .prepare('SELECT film_id, episode FROM scenes WHERE id = ? LIMIT 1')
+    .bind(id)
+    .first<{ film_id: string; episode: number }>()
+  if (existing)
+    return Response.json(
+      {
+        error: `Scene ${id} belongs to ${existing.film_id} episode ${existing.episode}; a new version can't move it.`
+      },
+      { status: 409 }
+    )
+  return Response.json(
+    { error: `Episode ${spec.episode} already has a scene.` },
+    { status: 409 }
+  )
 }
 
 export async function filmRoute(request: Request, env: Env, path: string) {
