@@ -68,7 +68,8 @@
     {
       "binding": "FILM_DB",
       "database_name": "mhoo-film",
-      "database_id": "512f0b43-c9c3-4045-915b-41f51df7ae64"
+      "database_id": "512f0b43-c9c3-4045-915b-41f51df7ae64",
+      "migrations_dir": "migrations"
     }
   ],
   "r2_buckets": [
