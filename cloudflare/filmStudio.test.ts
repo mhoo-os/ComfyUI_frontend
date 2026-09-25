@@ -432,6 +432,58 @@ describe('scene versions', () => {
     )
   })
 
+  it('resolves cast references, so approving the member clears its blocker', async () => {
+    const withCast = {
+      ...example,
+      shots: [
+        {
+          ...example.shots[0],
+          references: [
+            { role: 'identity', asset: 'cast:era-city' },
+            { role: 'start_frame', asset: 'pending:s01-pour-start' }
+          ]
+        },
+        {
+          ...example.shots[1],
+          references: [{ role: 'identity', asset: 'cast:nobody' }]
+        }
+      ]
+    }
+    expect(
+      (
+        await call('/scenes/coffee-cart/versions', {
+          method: 'POST',
+          body: withCast
+        })
+      ).status
+    ).toBe(201)
+    const readiness = async () =>
+      (
+        await read(
+          await call('/scenes/coffee-cart'),
+          z.object({
+            readiness: z.array(z.object({ blockers: z.array(z.string()) }))
+          })
+        )
+      ).readiness.map((shot) => shot.blockers)
+    expect(await readiness()).toEqual([
+      [
+        'Cast member era-city needs an approved image for identity.',
+        'Missing start_frame asset s01-pour-start.'
+      ],
+      ['Unknown cast member nobody.']
+    ])
+    await call('/cast/era-city/approve', {
+      method: 'POST',
+      body: { sourceRef: 'mhoo-asset:0b0c7d1e-2f3a-4b5c-8d9e-0f1a2b3c4d5e:1' }
+    })
+    expect((await readiness())[0]).toEqual([
+      'Missing start_frame asset s01-pour-start.'
+    ])
+    await call('/cast/era-city/revoke', { method: 'POST' })
+    expect((await readiness())[0][0]).toMatch(/era-city needs an approved/)
+  })
+
   it('refuses a cross-origin save', async () => {
     const response = await call('/scenes/coffee-cart/versions', {
       method: 'POST',

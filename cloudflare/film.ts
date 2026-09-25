@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { compileShot, compileTargets, isCompileTarget } from './compilers'
 import { boundedJson } from './http'
 import { renderBlockers, sceneSpecSchema } from './shotSpec'
+import type { ShotSpec } from './shotSpec'
 
 type SceneRow = { id: string; version: number; status: string; spec: string }
 
@@ -39,8 +40,39 @@ type CastRow = {
   note: string | null
 }
 
+type CastState = { status: string; source_ref: string | null }
+
+/** Replaces `cast:<id>` references with the member's approved image. An
+ * unapproved or unknown member stays a blocker, with a reason naming it. */
+function resolveCast(shot: ShotSpec, cast: Map<string, CastState>) {
+  const reasons = new Map<string, string>()
+  const references = shot.references.map((ref) => {
+    if (!ref.asset.startsWith('cast:')) return ref
+    const id = ref.asset.slice(5)
+    const member = cast.get(id)
+    if (member?.status === 'approved' && member.source_ref)
+      return { ...ref, asset: member.source_ref, approved: true }
+    reasons.set(
+      `Missing ${ref.role} asset ${id}.`,
+      member
+        ? `Cast member ${id} needs an approved image for ${ref.role}.`
+        : `Unknown cast member ${id}.`
+    )
+    return { ...ref, asset: `pending:${id}`, approved: false }
+  })
+  const resolved = { ...shot, references }
+  return {
+    shot: resolved,
+    blockers: renderBlockers(resolved).map(
+      (blocker) => reasons.get(blocker) ?? blocker
+    )
+  }
+}
+
 /** Reads a stored scene spec, re-validates it and reports per-shot readiness.
- * The database is private owner data; nothing here submits a generation. */
+ * `cast:` references resolve against the film's cast, so approving a member
+ * updates readiness without a new scene version. Nothing here submits a
+ * generation. */
 export async function loadScene(db: D1Database, id: string) {
   const row = await db
     .prepare(
@@ -60,15 +92,30 @@ export async function loadScene(db: D1Database, id: string) {
         (issue) => `${issue.path.join('.')}: ${issue.message}`
       )
     }
+  const usesCast = parsed.data.shots.some((shot) =>
+    shot.references.some((ref) => ref.asset.startsWith('cast:'))
+  )
+  const cast = new Map<string, CastState>()
+  if (usesCast) {
+    const { results } = await db
+      .prepare(
+        'SELECT id, status, source_ref FROM cast_members WHERE film_id = ?'
+      )
+      .bind(parsed.data.film)
+      .all<CastState & { id: string }>()
+    for (const member of results) cast.set(member.id, member)
+  }
+  const resolved = parsed.data.shots.map((shot) => resolveCast(shot, cast))
   return {
     id: row.id,
     version: row.version,
     status: row.status,
     valid: true as const,
     scene: parsed.data,
-    readiness: parsed.data.shots.map((shot) => ({
-      shot: shot.id,
-      blockers: renderBlockers(shot)
+    resolved: resolved.map((item) => item.shot),
+    readiness: resolved.map((item, index) => ({
+      shot: parsed.data.shots[index].id,
+      blockers: item.blockers
     }))
   }
 }
@@ -315,7 +362,7 @@ export async function filmRoute(request: Request, env: Env, path: string) {
     version: scene.version,
     target,
     submitted: false,
-    shots: scene.scene.shots.map((shot) => {
+    shots: scene.resolved.map((shot) => {
       try {
         return compileShot(shot, target)
       } catch (error) {
