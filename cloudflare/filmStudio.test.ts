@@ -432,6 +432,68 @@ describe('scene versions', () => {
     )
   })
 
+  it('keeps a test-set scene out of its episode', async () => {
+    const db = await mf.getD1Database('FILM_DB')
+    const testSet = (id: string, episode: number) =>
+      db
+        .prepare(
+          "INSERT INTO scenes (id, version, film_id, episode, title, status, spec) VALUES (?, 1, 'example-film', ?, 'Review set', 'test-set', ?)"
+        )
+        .bind(id, episode, JSON.stringify({ ...example, id, episode }))
+    await db.batch([testSet('review-one', 1), testSet('review-two', 2)])
+    const film = await read(
+      await call('/films/example-film'),
+      z.object({
+        episodes: z.array(
+          z.object({ status: z.string(), scene: z.string().nullable() })
+        )
+      })
+    )
+    expect(film.episodes.slice(0, 2)).toEqual([
+      { ...film.episodes[0], status: 'broken_down', scene: 'coffee-cart' },
+      { ...film.episodes[1], status: 'not_broken_down', scene: null }
+    ])
+    const next = await call('/scenes/coffee-cart/versions', {
+      method: 'POST',
+      body: example
+    })
+    expect(await next.json()).toEqual({ id: 'coffee-cart', version: 2 })
+    const fresh = await call('/scenes/new-cart/versions', {
+      method: 'POST',
+      body: { ...example, id: 'new-cart', episode: 2 }
+    })
+    expect(fresh.status).toBe(201)
+    // The test set itself stays readable.
+    expect((await call('/scenes/review-one')).status).toBe(200)
+  })
+
+  it('judges a scene by its latest version: a test set promoted to draft counts, a demoted one does not', async () => {
+    const db = await mf.getD1Database('FILM_DB')
+    const row = (id: string, version: number, status: string) =>
+      db
+        .prepare(
+          "INSERT INTO scenes (id, version, film_id, episode, title, status, spec) VALUES (?, ?, 'example-film', 2, 'Review set', ?, ?)"
+        )
+        .bind(
+          id,
+          version,
+          status,
+          JSON.stringify({ ...example, id, episode: 2 })
+        )
+    await db.batch([
+      row('promoted', 1, 'test-set'),
+      row('promoted', 2, 'draft')
+    ])
+    const save = () =>
+      call('/scenes/new-cart/versions', {
+        method: 'POST',
+        body: { ...example, id: 'new-cart', episode: 2 }
+      })
+    expect((await save()).status).toBe(409)
+    await db.batch([row('promoted', 3, 'test-set')])
+    expect((await save()).status).toBe(201)
+  })
+
   it('resolves cast references, so approving the member clears its blocker', async () => {
     const withCast = {
       ...example,
