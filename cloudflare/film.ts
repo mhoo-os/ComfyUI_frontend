@@ -50,15 +50,23 @@ function resolveCast(shot: ShotSpec, cast: Map<string, CastState>) {
     if (!ref.asset.startsWith('cast:')) return ref
     const id = ref.asset.slice(5)
     const member = cast.get(id)
-    if (member?.status === 'approved' && member.source_ref)
-      return { ...ref, asset: member.source_ref, approved: true }
-    reasons.set(
-      `Missing ${ref.role} asset ${id}.`,
-      member
-        ? `Cast member ${id} needs an approved image for ${ref.role}.`
-        : `Unknown cast member ${id}.`
+    const frame = ref.role === 'start_frame' || ref.role === 'end_frame'
+    if (
+      member?.status === 'approved' &&
+      member.source_ref &&
+      !(frame && member.source_ref.startsWith('mhoo-media:'))
     )
-    return { ...ref, asset: `pending:${id}`, approved: false }
+      return { ...ref, asset: member.source_ref, approved: true }
+    // A distinct placeholder keeps these reasons apart from ordinary pending: assets.
+    reasons.set(
+      `Missing ${ref.role} asset cast-${id}.`,
+      !member
+        ? `Unknown cast member ${id}.`
+        : member.status === 'approved' && member.source_ref
+          ? `Cast member ${id}'s image is archived media; a ${ref.role} needs a provider URL or character-library token.`
+          : `Cast member ${id} needs an approved image for ${ref.role}.`
+    )
+    return { ...ref, asset: `pending:cast-${id}`, approved: false }
   })
   const resolved = { ...shot, references }
   return {
@@ -73,7 +81,11 @@ function resolveCast(shot: ShotSpec, cast: Map<string, CastState>) {
  * `cast:` references resolve against the film's cast, so approving a member
  * updates readiness without a new scene version. Nothing here submits a
  * generation. */
-export async function loadScene(db: D1Database, id: string) {
+export async function loadScene(
+  db: D1Database,
+  id: string,
+  castByFilm = new Map<string, Promise<Map<string, CastState>>>()
+) {
   const row = await db
     .prepare(
       'SELECT id, version, status, spec FROM scenes WHERE id = ? ORDER BY version DESC LIMIT 1'
@@ -95,16 +107,23 @@ export async function loadScene(db: D1Database, id: string) {
   const usesCast = parsed.data.shots.some((shot) =>
     shot.references.some((ref) => ref.asset.startsWith('cast:'))
   )
-  const cast = new Map<string, CastState>()
-  if (usesCast) {
-    const { results } = await db
-      .prepare(
-        'SELECT id, status, source_ref FROM cast_members WHERE film_id = ?'
-      )
-      .bind(parsed.data.film)
-      .all<CastState & { id: string }>()
-    for (const member of results) cast.set(member.id, member)
-  }
+  const film = parsed.data.film
+  // One cast read per film, shared across scenes when the caller passes a cache.
+  if (usesCast && !castByFilm.has(film))
+    castByFilm.set(
+      film,
+      db
+        .prepare(
+          'SELECT id, status, source_ref FROM cast_members WHERE film_id = ?'
+        )
+        .bind(film)
+        .all<CastState & { id: string }>()
+        .then(({ results }) => new Map(results.map((m) => [m.id, m])))
+    )
+  const cast = usesCast
+    ? await (castByFilm.get(film) ??
+        Promise.resolve(new Map<string, CastState>()))
+    : new Map<string, CastState>()
   const resolved = parsed.data.shots.map((shot) => resolveCast(shot, cast))
   return {
     id: row.id,
@@ -161,6 +180,7 @@ async function filmOverview(db: D1Database, id: string) {
       )
       .bind(id)
   ])
+  const castCache = new Map<string, Promise<Map<string, CastState>>>()
   return Response.json({
     id: film.id,
     title: film.title,
@@ -183,7 +203,9 @@ async function filmOverview(db: D1Database, id: string) {
             ],
             shots: []
           }
-        const scene = inEpisode[0] ? await loadScene(db, inEpisode[0].id) : null
+        const scene = inEpisode[0]
+          ? await loadScene(db, inEpisode[0].id, castCache)
+          : null
         if (!scene)
           return {
             number: episode.number,

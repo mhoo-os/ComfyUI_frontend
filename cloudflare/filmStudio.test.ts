@@ -484,6 +484,34 @@ describe('scene versions', () => {
     expect((await readiness())[0][0]).toMatch(/era-city needs an approved/)
   })
 
+  it('blocks an archived cast image used as a start frame, and keeps pending: reasons apart', async () => {
+    const body = {
+      ...example,
+      shots: [
+        {
+          ...example.shots[0],
+          references: [
+            { role: 'identity', asset: 'cast:anchor-young' },
+            { role: 'start_frame', asset: 'cast:anchor-young' },
+            { role: 'setting', asset: 'pending:anchor-young' }
+          ]
+        },
+        example.shots[1]
+      ]
+    }
+    await call('/scenes/coffee-cart/versions', { method: 'POST', body })
+    const scene = await read(
+      await call('/scenes/coffee-cart'),
+      z.object({
+        readiness: z.array(z.object({ blockers: z.array(z.string()) }))
+      })
+    )
+    expect(scene.readiness[0].blockers).toEqual([
+      "Cast member anchor-young's image is archived media; a start_frame needs a provider URL or character-library token.",
+      'Missing setting asset anchor-young.'
+    ])
+  })
+
   it('refuses a cross-origin save', async () => {
     const response = await call('/scenes/coffee-cart/versions', {
       method: 'POST',
