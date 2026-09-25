@@ -64,6 +64,13 @@
     "enabled": true,
     "head_sampling_rate": 1
   },
+  "d1_databases": [
+    {
+      "binding": "FILM_DB",
+      "database_name": "mhoo-film",
+      "database_id": "512f0b43-c9c3-4045-915b-41f51df7ae64"
+    }
+  ],
   "r2_buckets": [
     {
       "binding": "COMFY_MEDIA",

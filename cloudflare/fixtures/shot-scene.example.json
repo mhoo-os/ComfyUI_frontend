@@ -1,0 +1,145 @@
+{
+  "version": 1,
+  "film": "example-film",
+  "episode": 1,
+  "id": "coffee-cart",
+  "title": "Coffee cart",
+  "shots": [
+    {
+      "version": 1,
+      "id": "s01-pour",
+      "purpose": "Show the craft.",
+      "truth": {
+        "kind": "mixed",
+        "facts": ["A street vendor sells coffee from a cart."],
+        "staged": ["Blocking and gestures are staged."]
+      },
+      "cast": [
+        {
+          "id": "vendor",
+          "description": "A coffee-cart vendor; generic, not modeled on any real person."
+        }
+      ],
+      "setting": "A coffee cart on a sunny plaza in the morning.",
+      "startingState": "The vendor stands behind the cart, cup in hand.",
+      "beats": [
+        {
+          "kind": "anticipation",
+          "performance": "Tilts the jug over the cup.",
+          "seconds": 1.5
+        },
+        {
+          "kind": "action",
+          "performance": "Pours a steady ribbon of milk.",
+          "seconds": 2
+        },
+        {
+          "kind": "reaction",
+          "performance": "Glances up, pleased.",
+          "seconds": 1.5
+        }
+      ],
+      "endingState": "The vendor smiling at a customer off-screen.",
+      "camera": {
+        "size": "medium",
+        "intent": "Keep the vendor's hands and face readable."
+      },
+      "colorState": "warm",
+      "sound": {
+        "vo": {
+          "text": "Every morning starts here."
+        },
+        "ambience": "Plaza chatter.",
+        "sfx": ["milk steamer"]
+      },
+      "references": [
+        {
+          "role": "identity",
+          "asset": "pending:vendor-actor"
+        },
+        {
+          "role": "start_frame",
+          "asset": "pending:s01-pour-start"
+        }
+      ],
+      "duration": 5,
+      "aspects": ["9:16", "16:9"],
+      "evaluation": [
+        "Hands hold the cup naturally.",
+        "The pour reads clearly."
+      ],
+      "overlays": [
+        {
+          "kind": "onomatopoeia",
+          "text": "PSSHH",
+          "atSeconds": 1
+        }
+      ]
+    },
+    {
+      "version": 1,
+      "id": "s02-hand-off",
+      "purpose": "Hand the cup over.",
+      "truth": {
+        "kind": "staged",
+        "facts": [],
+        "staged": ["Blocking and gestures are staged."]
+      },
+      "cast": [
+        {
+          "id": "vendor",
+          "description": "A coffee-cart vendor; generic, not modeled on any real person."
+        }
+      ],
+      "setting": "A coffee cart on a sunny plaza in the morning.",
+      "startingState": "The vendor stands behind the cart, cup in hand.",
+      "beats": [
+        {
+          "kind": "action",
+          "performance": "Holds the cup out across the cart.",
+          "seconds": 2
+        },
+        {
+          "kind": "reaction",
+          "performance": "Nods as it is taken.",
+          "seconds": 2
+        },
+        {
+          "kind": "hold",
+          "performance": "Hold on the vendor.",
+          "seconds": 1
+        }
+      ],
+      "endingState": "The vendor smiling at a customer off-screen.",
+      "camera": {
+        "size": "medium",
+        "intent": "Keep the vendor's hands and face readable."
+      },
+      "colorState": "warm",
+      "sound": {
+        "vo": {
+          "text": "Every morning starts here."
+        },
+        "ambience": "Plaza chatter.",
+        "sfx": ["milk steamer"]
+      },
+      "references": [
+        {
+          "role": "identity",
+          "asset": "pending:vendor-actor"
+        },
+        {
+          "role": "start_frame",
+          "asset": "pending:s02-hand-off-start"
+        }
+      ],
+      "duration": 5,
+      "aspects": ["9:16", "16:9"],
+      "evaluation": [
+        "Hands hold the cup naturally.",
+        "The pour reads clearly."
+      ],
+      "callbackTo": "s01-pour"
+    }
+  ]
+}
