@@ -1,0 +1,68 @@
+# Description: Deploy the mhoo-comfy Cloudflare Worker (cloudflare/) from main only
+name: 'Deploy: Higgsfield API'
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cloudflare/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/deploy-higgsfield-api.yaml'
+  workflow_dispatch:
+
+# Never cancel a deploy halfway; queue the next one behind it instead.
+concurrency:
+  group: deploy-higgsfield-api
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    # A manual run from any other branch would roll production back to that branch.
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    environment: cloudflare-production
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup frontend
+        uses: ./.github/actions/setup-frontend
+
+      - name: Typecheck worker
+        run: pnpm typecheck:higgsfield
+
+      - name: Test worker
+        run: pnpm test:higgsfield
+
+      - name: Check FILM_DB binding is configured
+        run: |
+          if ! grep -q '"binding": "FILM_DB"' cloudflare/wrangler.jsonc; then
+            echo '::error::cloudflare/wrangler.jsonc has no FILM_DB binding; refusing to deploy'
+            exit 1
+          fi
+
+      - name: Deploy worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -o pipefail
+          pnpm deploy:higgsfield:api 2>&1 | tee deploy.log
+
+      - name: Verify deploy
+        run: |
+          if ! grep -qE 'env\.FILM_DB \(mhoo-film\) +D1 Database' deploy.log; then
+            echo '::error::Deploy output does not list env.FILM_DB (mhoo-film) D1 Database'
+            exit 1
+          fi
+          version=$(grep -oE 'Current Version ID: [0-9a-f-]+' deploy.log | awk '{print $4}')
+          {
+            echo '### mhoo-comfy deployed'
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Version ID: \`${version}\`"
+            echo '- FILM_DB binding: present'
+          } >> "$GITHUB_STEP_SUMMARY"
