@@ -16,6 +16,8 @@ import {
   unapproveAttempt
 } from './attempts'
 import type { FilmEngine, RenderNode, ReviewReport, Reviewer } from './attempts'
+import { createCut, listCuts } from './cuts'
+import type { CutEngine, CutNode } from './cuts'
 import { boundedJson } from './http'
 import { reviewOutput } from './reviewer'
 
@@ -69,7 +71,7 @@ const jobSchema = z
 
 /** The render engine is the existing job ledger (ComfyJobs): one active job,
  * reference re-approval before submission, and no automatic resubmission. */
-function comfyEngine(env: Env): FilmEngine {
+function comfyEngine(env: Env): FilmEngine & CutEngine {
   const jobs = () => env.COMFY_JOBS.getByName('owner')
   const call = (path: string, body?: unknown) =>
     jobs().fetch(
@@ -79,6 +81,19 @@ function comfyEngine(env: Env): FilmEngine {
         ...(body !== undefined && { body: JSON.stringify(body) })
       })
     )
+  // A refusal means no job was created, so nothing was spent.
+  const submitGraph = async (graph: Record<string, CutNode | RenderNode>) => {
+    const response = await call('/prompt', { prompt: graph, client_id: 'film' })
+    const body: unknown = await response.json().catch(() => null)
+    if (!response.ok)
+      throw new AttemptError(
+        message(
+          body,
+          `The job ledger refused the render (HTTP ${response.status}).`
+        )
+      )
+    return z.object({ prompt_id: z.string() }).parse(body).prompt_id
+  }
   return {
     async estimate(node: RenderNode) {
       const response = await call('/higgsfield/estimate', {
@@ -100,30 +115,16 @@ function comfyEngine(env: Env): FilmEngine {
         note: null
       }
     },
-    async submit(node: RenderNode) {
-      const response = await call('/prompt', {
-        prompt: { '1': node },
-        client_id: 'film'
-      })
-      const body: unknown = await response.json().catch(() => null)
-      // A refusal here means no job was created, so nothing was spent.
-      if (!response.ok)
-        throw new AttemptError(
-          message(
-            body,
-            `The job ledger refused the render (HTTP ${response.status}).`
-          )
-        )
-      return z.object({ prompt_id: z.string() }).parse(body).prompt_id
-    },
-    async job(id: string) {
+    submit: (node: RenderNode) => submitGraph({ '1': node }),
+    submitGraph,
+    async job(id: string, node = '1') {
       const response = await call(`/jobs/${encodeURIComponent(id)}`)
       if (!response.ok)
         throw new Error(`Job status unavailable (HTTP ${response.status}).`)
       const job = jobSchema.parse(await response.json())
       const file =
-        job.outputs['1']?.video[0]?.filename ??
-        job.outputs['1']?.images[0]?.filename
+        job.outputs[node]?.video[0]?.filename ??
+        job.outputs[node]?.images[0]?.filename
       return {
         status: job.status,
         output: file ? file.replace(/\.(mp4|png)$/u, '') : null,
@@ -165,6 +166,7 @@ const createPath = new RegExp(
   'u'
 )
 const listPath = new RegExp(`^/film/scenes/${slug}/attempts$`, 'u')
+const cutsPath = new RegExp(`^/film/scenes/${slug}/cuts$`, 'u')
 const attemptPath = new RegExp(
   `^/film/attempts/${uuid}(?:/(approve|cancel|accept|reject|repair))?$`,
   'u'
@@ -217,6 +219,16 @@ export async function attemptRoute(request: Request, env: Env, path: string) {
           list[1],
           new URL(request.url).searchParams.get('shot') ?? undefined
         )
+      })
+    const cuts = cutsPath.exec(path)
+    if (cuts && request.method === 'POST')
+      return Response.json(await createCut(db, comfyEngine(env), cuts[1]), {
+        status: 201
+      })
+    if (cuts && request.method === 'GET')
+      return Response.json({
+        scene: cuts[1],
+        cuts: await listCuts(db, comfyEngine(env), cuts[1])
       })
     const match = attemptPath.exec(path)
     if (!match) return null

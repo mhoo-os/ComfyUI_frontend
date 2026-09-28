@@ -33,7 +33,8 @@ export type JobState = {
 export type FilmEngine = {
   estimate(node: RenderNode): Promise<Quote>
   submit(node: RenderNode): Promise<string>
-  job(id: string): Promise<JobState>
+  /** Status of a job, with the first output of `node` (default "1"). */
+  job(id: string, node?: string): Promise<JobState>
 }
 
 export type ReviewReport = {

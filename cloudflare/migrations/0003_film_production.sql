@@ -43,3 +43,23 @@ CREATE TABLE reviews (
   report TEXT NOT NULL CHECK (json_valid(report)),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Episode cuts: accepted takes, in shot order, rendered by the finishing
+-- pipeline (Cloudflare compute, not provider credits).
+CREATE TABLE cuts (
+  id TEXT PRIMARY KEY,
+  film_id TEXT NOT NULL,
+  episode INTEGER NOT NULL,
+  scene_id TEXT NOT NULL,
+  scene_version INTEGER NOT NULL,
+  -- [{"shot": ..., "attempt": ..., "output": ...}]
+  takes TEXT NOT NULL CHECK (json_valid(takes)),
+  status TEXT NOT NULL CHECK (status IN ('rendering', 'done', 'failed')),
+  job_id TEXT,
+  export_node TEXT NOT NULL,
+  output TEXT,
+  error TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  finished_at TEXT
+);
+CREATE INDEX cuts_by_scene ON cuts(scene_id, created_at);

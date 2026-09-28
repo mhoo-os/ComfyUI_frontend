@@ -28,7 +28,10 @@ import type {
   ReviewReport,
   StepLike
 } from './attempts'
+import { createCut, cutGraph, listCuts } from './cuts'
+import type { CutEngine, CutNode } from './cuts'
 import example from './fixtures/shot-scene.example.json'
+import { planGraph } from './graph'
 
 // Runs attempt logic against a local D1 built from the migrations, with a fake
 // engine: tests never reach a provider. Fixtures are generic: this repo is public.
@@ -100,7 +103,7 @@ afterAll(() => mf.dispose())
 
 beforeEach(async () => {
   await db.exec(
-    'DROP TABLE IF EXISTS reviews; DROP TABLE IF EXISTS attempts; DROP TABLE IF EXISTS cast_members; DROP TABLE IF EXISTS episodes; DROP TABLE IF EXISTS scenes; DROP TABLE IF EXISTS documents; DROP TABLE IF EXISTS films;'
+    'DROP TABLE IF EXISTS cuts; DROP TABLE IF EXISTS reviews; DROP TABLE IF EXISTS attempts; DROP TABLE IF EXISTS cast_members; DROP TABLE IF EXISTS episodes; DROP TABLE IF EXISTS scenes; DROP TABLE IF EXISTS documents; DROP TABLE IF EXISTS films;'
   )
   for (const file of readdirSync('cloudflare/migrations').sort()) {
     const statements = readFileSync(`cloudflare/migrations/${file}`, 'utf8')
@@ -545,5 +548,94 @@ describe('repair plan', () => {
     const repaired = applyRepair(node, { note: 'y'.repeat(200), fixes: [] })
     expect(String(repaired.inputs.prompt)).toHaveLength(2500)
     expect(repaired.inputs.image_url).toBe(start)
+  })
+})
+
+describe('episode cut', () => {
+  const job = '11111111-2222-4333-8444-555555555555'
+  async function acceptAll(engine: Engine) {
+    for (const shot of readyScene.shots) {
+      engine.state = { status: 'completed', output: `${job}/1/0`, error: null }
+      const attempt = await createAttempt(db, engine, {
+        sceneId: 'coffee-cart',
+        shotId: shot.id,
+        target: 'kling-2.5-standard'
+      })
+      await approveAttempt(db, attempt.id)
+      await runAttempt(attempt.id, fakeStep({ approve: true }).step, {
+        db,
+        engine,
+        reviewer: async () => report()
+      })
+      await decideAttempt(db, attempt.id, 'accept')
+    }
+  }
+  function cutEngine() {
+    const graphs: Record<string, CutNode>[] = []
+    let state: JobState = { status: 'in_progress', output: null, error: null }
+    const engine: CutEngine & {
+      graphs: typeof graphs
+      finish(value: JobState): void
+    } = {
+      graphs,
+      finish(value) {
+        state = value
+      },
+      async submitGraph(graph) {
+        graphs.push(graph)
+        return '99999999-2222-4333-8444-555555555555'
+      },
+      async job() {
+        return state
+      }
+    }
+    return engine
+  }
+
+  it('builds a finishing graph the job ledger accepts', () => {
+    const { graph, exportNode } = cutGraph(
+      [
+        { shot: 'a', attempt: 'x', output: `${job}/1/0`, seconds: 5 },
+        { shot: 'b', attempt: 'y', output: `${job}/1/0`, seconds: 40 }
+      ],
+      '9:16'
+    )
+    expect(exportNode).toBe('5')
+    expect(graph['2'].inputs.duration).toBe(30)
+    expect(() => planGraph(graph)).not.toThrow()
+  })
+
+  it('needs an accepted take for every shot', async () => {
+    await expect(createCut(db, cutEngine(), 'coffee-cart')).rejects.toThrow(
+      /accepted take first/
+    )
+  })
+
+  it('renders the accepted takes in order and records the finished cut', async () => {
+    await acceptAll(fakeEngine())
+    const engine = cutEngine()
+    const cut = await createCut(db, engine, 'coffee-cart')
+    expect(cut).toMatchObject({
+      status: 'rendering',
+      takes: readyScene.shots.map((shot) =>
+        expect.objectContaining({ shot: shot.id })
+      )
+    })
+    expect(
+      Object.values(engine.graphs[0]).map((node) => node.class_type)
+    ).toContain('MhooExport')
+    await expect(createCut(db, engine, 'coffee-cart')).rejects.toThrow(
+      /already rendering/
+    )
+    engine.finish({
+      status: 'completed',
+      output: `99999999-2222-4333-8444-555555555555/${readyScene.shots.length + 3}/0`,
+      error: null
+    })
+    const [done] = await listCuts(db, engine, 'coffee-cart')
+    expect(done).toMatchObject({
+      status: 'done',
+      output: `99999999-2222-4333-8444-555555555555/${readyScene.shots.length + 3}/0`
+    })
   })
 })

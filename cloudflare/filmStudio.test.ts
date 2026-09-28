@@ -62,7 +62,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   const db = await mf.getD1Database('FILM_DB')
   await db.exec(
-    'DROP TABLE IF EXISTS reviews; DROP TABLE IF EXISTS attempts; DROP TABLE IF EXISTS cast_members; DROP TABLE IF EXISTS episodes; DROP TABLE IF EXISTS scenes; DROP TABLE IF EXISTS documents; DROP TABLE IF EXISTS films;'
+    'DROP TABLE IF EXISTS cuts; DROP TABLE IF EXISTS reviews; DROP TABLE IF EXISTS attempts; DROP TABLE IF EXISTS cast_members; DROP TABLE IF EXISTS episodes; DROP TABLE IF EXISTS scenes; DROP TABLE IF EXISTS documents; DROP TABLE IF EXISTS films;'
   )
   for (const file of readdirSync('cloudflare/migrations').sort()) {
     const sql = readFileSync(`cloudflare/migrations/${file}`, 'utf8')
