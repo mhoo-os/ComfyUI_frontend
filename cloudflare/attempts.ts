@@ -378,10 +378,19 @@ export async function cancelAttempt(
   )
 }
 
-/** Workflow step: claims the approval and submits once. Returns the job id, or
- * null when there is nothing to submit. A failure is recorded, never retried.
- * The job id is written by a separate step, so a failed write can't lose it. */
-async function claimAndSubmit(db: D1Database, engine: FilmEngine, id: string) {
+/** The outcome of one submission step. `refused` means the job ledger was
+ * full and created no job, so the claim was released and nothing was spent. */
+type Submission = { job: string } | { refused: string } | null
+
+/** Workflow step: claims the approval and submits once. Returns the job id,
+ * a refusal (claim released, free to try again), or null when there is
+ * nothing to submit. Any other failure is recorded and never retried. The job
+ * id is written by a separate step, so a failed write can't lose it. */
+async function claimAndSubmit(
+  db: D1Database,
+  engine: FilmEngine,
+  id: string
+): Promise<Submission> {
   const claimed = await db
     .prepare(
       "UPDATE attempts SET status = 'submitting' WHERE id = ? AND status = 'approved' RETURNING *"
@@ -391,26 +400,45 @@ async function claimAndSubmit(db: D1Database, engine: FilmEngine, id: string) {
   if (!claimed) return null
   const row = rowSchema.parse(claimed)
   try {
-    return await engine.submit(nodeSchema.parse(JSON.parse(row.request)))
+    return {
+      job: await engine.submit(nodeSchema.parse(JSON.parse(row.request)))
+    }
   } catch (error) {
     const message =
       error instanceof Error ? error.message : 'Submission failed.'
-    const refused = error instanceof RefusedError
+    if (error instanceof RefusedError) {
+      await db
+        .prepare(
+          "UPDATE attempts SET status = 'approved', error = ?2 WHERE id = ?1 AND status = 'submitting'"
+        )
+        .bind(id, `${message} Waiting for a free render slot.`)
+        .run()
+      return { refused: message }
+    }
     await db
       .prepare(
-        `UPDATE attempts SET status = 'failed', error = ?2, spend_usd = ?3, finished_at = datetime('now')
+        `UPDATE attempts SET status = 'failed', error = ?2, spend_usd = NULL, finished_at = datetime('now')
          WHERE id = ?1 AND status = 'submitting'`
       )
       .bind(
         id,
-        refused
-          ? message
-          : `${message} The outcome is unknown: check the job history before trying again. Nothing was retried.`,
-        refused ? 0 : null
+        `${message} The outcome is unknown: check the job history before trying again. Nothing was retried.`
       )
       .run()
     return null
   }
+}
+
+/** Closes an approved attempt the ledger kept refusing: no job was created,
+ * so it spent nothing and uses no slot. */
+async function refuseAttempt(db: D1Database, id: string, message: string) {
+  await db
+    .prepare(
+      `UPDATE attempts SET status = 'failed', error = ?2, spend_usd = 0, finished_at = datetime('now')
+       WHERE id = ?1 AND status = 'approved'`
+    )
+    .bind(id, message)
+    .run()
 }
 
 /** Workflow step (retried): records the submitted job. */
@@ -423,15 +451,21 @@ async function recordJob(db: D1Database, id: string, jobId: string) {
     .run()
 }
 
-/** Both submission steps in one call, for callers outside a Workflow. */
+/** Both submission steps in one call, for callers outside a Workflow. A
+ * refusal is recorded as a free failure rather than waited out. */
 export async function submitAttempt(
   db: D1Database,
   engine: FilmEngine,
   id: string
 ) {
-  const jobId = await claimAndSubmit(db, engine, id)
-  if (jobId) await recordJob(db, id, jobId)
-  return jobId
+  const result = await claimAndSubmit(db, engine, id)
+  if (!result) return null
+  if ('refused' in result) {
+    await refuseAttempt(db, id, result.refused)
+    return null
+  }
+  await recordJob(db, id, result.job)
+  return result.job
 }
 
 /** Workflow step: reads the job and records the result. Returns the new status. */
@@ -727,6 +761,36 @@ async function awaitApproval(id: string, step: StepLike, deps: Deps) {
   }
 }
 
+/** How long to wait for a free render slot after the nth refusal: 30 s,
+ * doubling to a 5-minute ceiling, for about three hours in all. */
+const slotWait = (tries: number) => Math.min(30_000 * 2 ** tries, 300_000)
+const slotTries = 40
+
+/** Submits once a render slot is free. A refusal created no job, so waiting
+ * and trying again can never bill twice; any other failure is final. */
+async function submitWhenFree(id: string, step: StepLike, deps: Deps) {
+  for (let tries = 0; tries < slotTries; tries++) {
+    // Instances started before refusals were retried cached a bare job id.
+    const result: Submission | string = await step.do(
+      tries ? `submit-${tries}` : 'submit',
+      once,
+      () => claimAndSubmit(deps.db, deps.engine, id)
+    )
+    if (typeof result === 'string') return result
+    if (!result) return null
+    if ('job' in result) return result.job
+    await step.sleep(`slot-wait-${tries}`, slotWait(tries))
+  }
+  await step.do('refused', once, () =>
+    refuseAttempt(
+      deps.db,
+      id,
+      'Every render slot stayed busy for hours. Nothing was submitted or spent; approve a new quote to try again.'
+    )
+  )
+  return null
+}
+
 /** The job id lives in this Workflow's step state; keep trying to record it
  * (for about a day) rather than lose track of a paid job. */
 async function recordPatiently(
@@ -772,9 +836,7 @@ async function track(id: string, step: StepLike, deps: Deps) {
 
 export async function runAttempt(id: string, step: StepLike, deps: Deps) {
   if (!(await awaitApproval(id, step, deps))) return 'cancelled'
-  const job = await step.do('submit', once, () =>
-    claimAndSubmit(deps.db, deps.engine, id)
-  )
+  const job = await submitWhenFree(id, step, deps)
   if (!job) return 'not submitted'
   if (!(await recordPatiently(id, job, step, deps))) return 'submitting'
   const status = await track(id, step, deps)

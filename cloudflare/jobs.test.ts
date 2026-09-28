@@ -239,6 +239,243 @@ describe('Durable workflow lifecycle', () => {
   })
 })
 
+describe('Concurrent jobs', () => {
+  /** A provider whose requests finish when the test says so. */
+  function provider() {
+    const state = {
+      submissions: 0,
+      cancels: 0,
+      ids: [] as string[],
+      outcome: new Map<string, 'completed' | 'failed'>()
+    }
+    const handler = async (request: MiniflareRequest) => {
+      const path = new URL(request.url).pathname
+      if (path.endsWith('/cancel')) {
+        state.cancels++
+        return new Response(null, { status: 202 })
+      }
+      if (request.method === 'POST') {
+        state.submissions++
+        const id = crypto.randomUUID()
+        state.ids.push(id)
+        return Response.json({ request_id: id, status: 'queued' })
+      }
+      const id = path.split('/').at(-2) ?? ''
+      const outcome = state.outcome.get(id)
+      return Response.json({
+        request_id: id,
+        status: outcome ?? 'in_progress',
+        images:
+          outcome === 'completed'
+            ? [{ url: `https://cdn.example.com/${id}.png` }]
+            : null,
+        video: null,
+        ...(outcome === 'failed' && { error: 'Provider rejected the input' })
+      })
+    }
+    return { state, handler }
+  }
+  const submit = (mf: Miniflare, prompt: unknown = graph) =>
+    mf.dispatchFetch('https://test/prompt', {
+      method: 'POST',
+      body: JSON.stringify({ prompt })
+    })
+  const statusOf = async (mf: Miniflare, id: string) =>
+    z
+      .object({ status: z.string(), outputs_count: z.number() })
+      .parse(await (await mf.dispatchFetch(`https://test/jobs/${id}`)).json())
+  const requestOf = async (mf: Miniflare, id: string) =>
+    z
+      .object({ provider_request_id: z.string() })
+      .parse(await (await mf.dispatchFetch(`https://test/jobs/${id}`)).json())
+      .provider_request_id
+  const remaining = async (mf: Miniflare) =>
+    z
+      .object({ exec_info: z.object({ queue_remaining: z.number() }) })
+      .parse(await (await mf.dispatchFetch('https://test/prompt')).json())
+      .exec_info.queue_remaining
+
+  // The ledger runs four jobs at once.
+  it('runs four jobs at once, refuses a fifth, and frees a slot when one completes', async () => {
+    const { state, handler } = provider()
+    const mf = await runtime(handler)
+    const queued = []
+    for (let i = 0; i < 4; i++) queued.push(await queue(mf))
+    const refused = await submit(mf)
+    expect(refused.status).toBe(409)
+    expect(await refused.json()).toMatchObject({
+      error: { type: 'queue_full' }
+    })
+    expect(await remaining(mf)).toBe(4)
+    await tick(mf)
+    expect(state.submissions).toBe(4)
+    state.outcome.set(await requestOf(mf, queued[0].prompt_id), 'completed')
+    await tick(mf)
+    expect(await statusOf(mf, queued[0].prompt_id)).toMatchObject({
+      status: 'completed',
+      outputs_count: 1
+    })
+    expect(await remaining(mf)).toBe(3)
+    expect((await submit(mf)).status).toBe(200)
+    await tick(mf)
+    expect(state.submissions).toBe(5)
+  })
+
+  it('frees the slots of a failed job and a cancelled job without touching the others', async () => {
+    const { state, handler } = provider()
+    const mf = await runtime(handler)
+    const queued = []
+    for (let i = 0; i < 4; i++) queued.push(await queue(mf))
+    await tick(mf)
+    state.outcome.set(await requestOf(mf, queued[1].prompt_id), 'failed')
+    await mf.dispatchFetch(`https://test/jobs/${queued[0].prompt_id}/cancel`, {
+      method: 'POST'
+    })
+    await tick(mf)
+    expect(state.cancels).toBe(1)
+    expect((await statusOf(mf, queued[0].prompt_id)).status).toBe('cancelled')
+    expect((await statusOf(mf, queued[1].prompt_id)).status).toBe('failed')
+    expect((await statusOf(mf, queued[2].prompt_id)).status).toBe('in_progress')
+    expect((await statusOf(mf, queued[3].prompt_id)).status).toBe('in_progress')
+    expect(await remaining(mf)).toBe(2)
+    expect((await submit(mf)).status).toBe(200)
+    expect((await submit(mf)).status).toBe(200)
+    expect((await submit(mf)).status).toBe(409)
+    expect(state.submissions).toBe(4)
+  })
+
+  it('submits independent nodes together and a linked node only after its input', async () => {
+    const { state, handler } = provider()
+    const mf = await runtime(async (request) => {
+      const response = await handler(request)
+      for (const id of state.ids) state.outcome.set(id, 'completed')
+      return response
+    })
+    const job = await queue(mf, {
+      '1': { class_type: 'HiggsfieldSoul', inputs: { prompt: 'A lake' } },
+      '2': { class_type: 'HiggsfieldSoul', inputs: { prompt: 'A forest' } },
+      '3': {
+        class_type: 'HiggsfieldAnimate',
+        inputs: { image_url: ['1', 0], prompt: 'Wind' }
+      }
+    })
+    await tick(mf)
+    expect(state.submissions).toBe(2)
+    await tick(mf)
+    expect(state.submissions).toBe(3)
+    await tick(mf)
+    expect(await statusOf(mf, job.prompt_id)).toMatchObject({
+      status: 'completed',
+      outputs_count: 3
+    })
+  })
+
+  it('follows a running sibling to the end when one node fails, and submits nothing new', async () => {
+    const { state, handler } = provider()
+    const mf = await runtime(handler)
+    const job = await queue(mf, {
+      '1': { class_type: 'HiggsfieldSoul', inputs: { prompt: 'A lake' } },
+      '2': { class_type: 'HiggsfieldSoul', inputs: { prompt: 'A forest' } },
+      '3': {
+        class_type: 'HiggsfieldAnimate',
+        inputs: { image_url: ['2', 0], prompt: 'Wind' }
+      }
+    })
+    await tick(mf)
+    state.outcome.set(state.ids[0], 'failed')
+    await tick(mf)
+    expect((await statusOf(mf, job.prompt_id)).status).toBe('in_progress')
+    state.outcome.set(state.ids[1], 'completed')
+    await tick(mf)
+    expect(state.submissions).toBe(2)
+    expect(await jobs(mf)).toMatchObject({
+      jobs: [
+        {
+          status: 'failed',
+          outputs_count: 1,
+          execution_error: { node_id: '1' }
+        }
+      ]
+    })
+  })
+
+  it('keeps following a job saved by the single-slot ledger without resubmitting it', async () => {
+    const { state, handler } = provider()
+    const mf = await runtime(handler)
+    const put = (key: string, value: unknown) =>
+      mf.dispatchFetch('https://test/test/put', {
+        method: 'POST',
+        body: JSON.stringify({ key, value })
+      })
+    const now = Date.now()
+    await put('job:legacy', {
+      id: 'legacy',
+      graph,
+      order: ['1'],
+      workflow: null,
+      clientId: '',
+      status: 'in_progress',
+      created: now,
+      updated: now,
+      index: 0,
+      outputs: {},
+      requestId,
+      providerRequests: { '1': requestId }
+    })
+    await put('active', 'legacy')
+    expect(await remaining(mf)).toBe(1)
+    state.outcome.set(requestId, 'completed')
+    await tick(mf)
+    expect(state.submissions).toBe(0)
+    expect(await statusOf(mf, 'legacy')).toMatchObject({
+      status: 'completed',
+      outputs_count: 1
+    })
+    expect(await remaining(mf)).toBe(0)
+  })
+
+  it('fails a job saved mid-submission by the single-slot ledger instead of resubmitting', async () => {
+    const { state, handler } = provider()
+    const mf = await runtime(handler)
+    const now = Date.now()
+    await mf.dispatchFetch('https://test/test/put', {
+      method: 'POST',
+      body: JSON.stringify({
+        key: 'job:legacy',
+        value: {
+          id: 'legacy',
+          graph,
+          order: ['1'],
+          workflow: null,
+          clientId: '',
+          status: 'in_progress',
+          created: now,
+          updated: now,
+          index: 0,
+          outputs: {},
+          submitting: true
+        }
+      })
+    })
+    await mf.dispatchFetch('https://test/test/put', {
+      method: 'POST',
+      body: JSON.stringify({ key: 'active', value: 'legacy' })
+    })
+    await tick(mf)
+    expect(state.submissions).toBe(0)
+    expect(await jobs(mf)).toMatchObject({
+      jobs: [
+        {
+          status: 'failed',
+          execution_error: {
+            exception_message: expect.stringMatching(/outcome is unknown/)
+          }
+        }
+      ]
+    })
+  })
+})
+
 describe('Reference pipeline and storage', () => {
   it('uploads with provider headers without forwarding credentials to storage', async () => {
     const mf = await runtime(async (request) => {

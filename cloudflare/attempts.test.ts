@@ -325,6 +325,146 @@ describe('submission', () => {
 })
 
 describe('the render workflow', () => {
+  const completed: FilmEngine['job'] = async () => ({
+    status: 'completed',
+    output: '11111111-2222-4333-8444-555555555555/1/0',
+    error: null
+  })
+
+  it('waits for a free render slot, then submits exactly once', async () => {
+    const engine = fakeEngine()
+    const attempt = await quoteShot(engine)
+    await approveAttempt(db, attempt.id)
+    let refusals = 2
+    const busy: FilmEngine = {
+      ...engine,
+      async submit(node) {
+        if (refusals-- > 0) {
+          expect(await getAttempt(db, attempt.id)).toMatchObject({
+            status: 'submitting'
+          })
+          throw new RefusedError('4 workflows are already running.')
+        }
+        return engine.submit(node)
+      },
+      job: completed
+    }
+    const { step, names } = fakeStep({ approve: true })
+    const result = await runAttempt(attempt.id, step, {
+      db,
+      engine: busy,
+      reviewer: async () => report()
+    })
+    expect(result).toBe('reviewed')
+    expect(engine.submitted).toHaveLength(1)
+    expect(names.slice(1, 7)).toEqual([
+      'submit',
+      'slot-wait-0',
+      'submit-1',
+      'slot-wait-1',
+      'submit-2',
+      'record-job'
+    ])
+    expect(await getAttempt(db, attempt.id)).toMatchObject({
+      status: 'reviewed',
+      spendUsd: 1.5
+    })
+  })
+
+  it('shows a refused attempt as approved and waiting, and lets the owner cancel it', async () => {
+    const engine = fakeEngine()
+    engine.refuse = true
+    const attempt = await quoteShot(engine)
+    await approveAttempt(db, attempt.id)
+    const names: string[] = []
+    const step: StepLike = {
+      async do(name, _config, fn) {
+        names.push(name)
+        return fn()
+      },
+      async sleep(name) {
+        names.push(name)
+        const waiting = await getAttempt(db, attempt.id)
+        expect(waiting).toMatchObject({ status: 'approved' })
+        expect(waiting?.error).toMatch(/Waiting for a free render slot/)
+        await cancelAttempt(db, attempt.id)
+      },
+      async waitForEvent() {
+        return { type: 'approve' }
+      }
+    }
+    expect(
+      await runAttempt(attempt.id, step, {
+        db,
+        engine,
+        reviewer: async () => report()
+      })
+    ).toBe('not submitted')
+    expect(names).toEqual(['submit', 'slot-wait-0', 'submit-1'])
+    expect(engine.submitted).toEqual([])
+    expect(await getAttempt(db, attempt.id)).toMatchObject({
+      status: 'cancelled'
+    })
+  })
+
+  it('gives up after hours of refusals, as a free failure that uses no slot', async () => {
+    const engine = fakeEngine()
+    engine.refuse = true
+    const attempt = await quoteShot(engine)
+    await approveAttempt(db, attempt.id)
+    const { step, names } = fakeStep({ approve: true })
+    expect(
+      await runAttempt(attempt.id, step, {
+        db,
+        engine,
+        reviewer: async () => report()
+      })
+    ).toBe('not submitted')
+    expect(names.filter((name) => name.startsWith('submit'))).toHaveLength(40)
+    expect(names.at(-1)).toBe('refused')
+    expect(await getAttempt(db, attempt.id)).toMatchObject({
+      status: 'failed',
+      spendUsd: 0
+    })
+    expect((await spendSummary(db, 'example-film')).total).toBe(0)
+    engine.refuse = false
+    expect((await quoteShot(engine)).number).toBe(1)
+  })
+
+  it('never resubmits when the first submit step replays a job id cached by an older run', async () => {
+    const engine = fakeEngine()
+    const attempt = await quoteShot(engine)
+    await approveAttempt(db, attempt.id)
+    await db
+      .prepare("UPDATE attempts SET status = 'submitting' WHERE id = ?")
+      .bind(attempt.id)
+      .run()
+    const step: StepLike = {
+      async do(name, _config, fn) {
+        // Replays the serialized result an older run stored for this step.
+        if (name === 'submit')
+          return JSON.parse('"11111111-2222-4333-8444-555555555555"')
+        return fn()
+      },
+      async sleep() {},
+      async waitForEvent() {
+        return { type: 'approve' }
+      }
+    }
+    expect(
+      await runAttempt(attempt.id, step, {
+        db,
+        engine: { ...engine, job: completed },
+        reviewer: async () => report()
+      })
+    ).toBe('reviewed')
+    expect(engine.submitted).toEqual([])
+    expect(await getAttempt(db, attempt.id)).toMatchObject({
+      status: 'reviewed',
+      job: '11111111-2222-4333-8444-555555555555'
+    })
+  })
+
   it('waits for approval, submits once, tracks the job and stores the review', async () => {
     const engine = fakeEngine()
     const attempt = await quoteShot(engine)

@@ -8,6 +8,7 @@ export class ComfyProduction extends ProductionWorkflow {
   }
 }
 import { DurableObject } from 'cloudflare:workers'
+import { z } from 'zod'
 import { uploadProductionMedia } from '../rendering'
 import { ComfyJobs } from '../jobs'
 import { uploadImage } from '../media'
@@ -22,9 +23,16 @@ export class TestJobs extends ComfyJobs {
     })
   }
   override async fetch(request: Request) {
+    if (new URL(request.url).pathname === '/test/put') {
+      const { key, value } = z
+        .object({ key: z.string(), value: z.unknown() })
+        .parse(await request.json())
+      await this.ctx.storage.put(key, value)
+      return Response.json({})
+    }
     if (new URL(request.url).pathname === '/test/tick') {
       await this.ctx.storage.deleteAlarm()
-      await this.alarm()
+      await this.runDue(Infinity)
       await this.ctx.storage.deleteAlarm()
       return Response.json({})
     }
