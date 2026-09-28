@@ -723,33 +723,42 @@ export class ComfyJobs extends DurableObject<Env> {
 
   private async cancel(job: Active) {
     for (const run of Object.values(job.running)) {
-      if (!run.requestId) continue
-      try {
-        await provider(this.env, `requests/${run.requestId}/cancel`, {})
-      } catch {
-        // Stop asking, but keep the cancellation: nothing new is submitted,
-        // and requests still running are followed to the end.
-        job.cancelRequested = false
-        job.halted ??= {
-          status: 'cancelled',
-          error:
-            'Workflow cancelled. Higgsfield could not cancel every running request; those were followed to the end.',
-          node: currentNode(job)
-        }
-        await this.ctx.storage.put(`job:${job.id}`, job)
-        this.broadcast('notification', {
-          value:
-            'Higgsfield could not cancel this request. It may already be processing; tracking continues.'
-        })
-        await this.schedule(job, 5000)
-        return
-      }
+      if (run.requestId && !(await this.cancelRequest(run.requestId)))
+        return this.keepCancelling(job)
     }
     await this.finish(
       job,
       'cancelled',
       'Workflow cancelled. Completed nodes remain in history.'
     )
+  }
+
+  private async cancelRequest(requestId: string) {
+    try {
+      await provider(this.env, `requests/${requestId}/cancel`, {})
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** Higgsfield refused to cancel a running request. Stop asking but keep
+   * the cancellation: nothing new is submitted, and requests still running
+   * are followed to the end. */
+  private async keepCancelling(job: Active) {
+    job.cancelRequested = false
+    job.halted ??= {
+      status: 'cancelled',
+      error:
+        'Workflow cancelled. Higgsfield could not cancel every running request; those were followed to the end.',
+      node: currentNode(job)
+    }
+    await this.ctx.storage.put(`job:${job.id}`, job)
+    this.broadcast('notification', {
+      value:
+        'Higgsfield could not cancel this request. It may already be processing; tracking continues.'
+    })
+    await this.schedule(job, 5000)
   }
 
   private started(job: Active) {
