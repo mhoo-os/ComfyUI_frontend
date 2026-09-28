@@ -6,7 +6,11 @@ import type { ShotSpec } from './shotSpec'
 /** Compiles a shot spec into one graph node that passes the same validation
  * as a canvas run. VO, overlays and truth labels stay out of prompts. */
 
-export const compileTargets = ['kling-2.5-standard', 'seedance-2.5'] as const
+export const compileTargets = [
+  'kling-2.5-standard',
+  'kling-3.0-standard',
+  'seedance-2.5'
+] as const
 export type CompileTarget = (typeof compileTargets)[number]
 export const isCompileTarget = (value: string): value is CompileTarget =>
   compileTargets.some((target) => target === value)
@@ -89,7 +93,7 @@ function kling(shot: ShotSpec, image: string) {
   const actions = shot.beats.map((beat) => sentence(beat.performance))
   const prompt = [
     ...actions,
-    `${sentence(camera(shot))}`,
+    sentence(camera(shot)),
     'Keep the look of the starting image.'
   ].join(' ')
   return {
@@ -104,17 +108,16 @@ function kling(shot: ShotSpec, image: string) {
   }
 }
 
-/** Seedance 2.5 image-to-video: ordered, timed beats with camera intent and
- * continuity; optional end frame. Audio is generated in finishing by default. */
-function seedance(shot: ShotSpec, image: string) {
+/** Starting state, timed beats, ending, camera intent and continuity, one
+ * line each, then how to treat the start frame and what to avoid. */
+function directedPrompt(shot: ShotSpec, keep: string) {
   let at = 0
   const beats = shot.beats.map((beat) => {
     const start = at
     at += beat.seconds
     return `${start}-${at}s (${beat.kind}): ${sentence(beat.performance)}`
   })
-  const end = frame(shot, 'end_frame')
-  const prompt = [
+  return [
     `Starting state: ${sentence(shot.startingState)}`,
     ...beats,
     `Ending: ${sentence(shot.endingState)}`,
@@ -122,11 +125,42 @@ function seedance(shot: ShotSpec, image: string) {
     shot.continuity.length
       ? `Keep consistent: ${shot.continuity.join(' ')}`
       : '',
-    'Keep the look of the starting image.',
+    keep,
     `Avoid: ${avoid(shot).join(', ')}.`
   ]
     .filter(Boolean)
     .join('\n')
+}
+
+/** Kling 3.0 Standard image-to-video: a directed shot rather than 2.5's
+ * concise line: visible performance in order, camera intent and continuity.
+ * Takes an end frame and 3-15 whole seconds (shot specs already stop at 15,
+ * and the node schema rejects anything longer). There is no negative prompt,
+ * so the avoid list stays in the prompt. Audio is generated in finishing. */
+function kling3(shot: ShotSpec, image: string) {
+  const end = frame(shot, 'end_frame')
+  const prompt = directedPrompt(
+    shot,
+    'One continuous shot. Keep the look and identity of the starting image.'
+  )
+  return {
+    class_type: 'HiggsfieldKling3Standard',
+    inputs: {
+      prompt,
+      image_url: image,
+      ...(end ? { end_image_url: end } : {}),
+      duration: Math.max(3, Math.ceil(shot.duration)),
+      sound: 'off'
+    },
+    notes: ['Audio is left to finishing (VO, ambience and effects).']
+  }
+}
+
+/** Seedance 2.5 image-to-video: ordered, timed beats with camera intent and
+ * continuity; optional end frame. Audio is generated in finishing by default. */
+function seedance(shot: ShotSpec, image: string) {
+  const end = frame(shot, 'end_frame')
+  const prompt = directedPrompt(shot, 'Keep the look of the starting image.')
   return {
     class_type: 'HiggsfieldAnimate',
     inputs: {
@@ -141,6 +175,18 @@ function seedance(shot: ShotSpec, image: string) {
   }
 }
 
+const compilers = {
+  'kling-2.5-standard': kling,
+  'kling-3.0-standard': kling3,
+  'seedance-2.5': seedance
+} satisfies Record<
+  CompileTarget,
+  (
+    shot: ShotSpec,
+    image: string
+  ) => { class_type: string; inputs: Input; notes: string[] }
+>
+
 export function compileShot(
   shot: ShotSpec,
   target: CompileTarget
@@ -151,8 +197,7 @@ export function compileShot(
   const image = frame(shot, 'start_frame')
   if (!image)
     throw new Error(`${shot.id}: image-to-video needs a start_frame reference.`)
-  const draft =
-    target === 'kling-2.5-standard' ? kling(shot, image) : seedance(shot, image)
+  const draft = compilers[target](shot, image)
   const { graph } = planGraph({
     [shot.id]: { class_type: draft.class_type, inputs: draft.inputs }
   })

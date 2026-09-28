@@ -290,5 +290,46 @@
       },
       "required": ["prompt", "image_url"]
     }
+  },
+  "HiggsfieldKling3Standard": {
+    "title": "Kling 3.0 Standard · Video",
+    "endpoint": "kling-video/v3.0/std/image-to-video",
+    "kind": "video",
+    "source": "https://open.higgsfield.ai/models/kling-video/v3.0/std/image-to-video/api-reference",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string"
+        },
+        "image_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "end_image_url": {
+          "type": "string",
+          "format": "uri",
+          "providerField": "last_image_url"
+        },
+        "duration": {
+          "type": "integer",
+          "minimum": 3,
+          "maximum": 15,
+          "default": 5
+        },
+        "cfg_scale": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.5
+        },
+        "sound": {
+          "type": "string",
+          "enum": ["on", "off"],
+          "default": "off"
+        }
+      },
+      "required": ["image_url"]
+    }
   }
 }
