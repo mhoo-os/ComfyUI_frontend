@@ -6,6 +6,8 @@ import { z } from 'zod'
 
 import { compileShot, isCompileTarget } from './compilers'
 import type { CompileTarget } from './compilers'
+import { COUNTED, OPEN, committed, statuses } from './attemptLedger'
+import type { AttemptStatus } from './attemptLedger'
 import { loadScene } from './film'
 import type { Input } from './graph'
 import type { Defect, VisionReview } from './reviewer'
@@ -51,20 +53,6 @@ export type Reviewer = (input: {
   output: string
 }) => Promise<ReviewReport>
 
-const statuses = [
-  'quoted',
-  'approved',
-  'submitting',
-  'rendering',
-  'rendered',
-  'reviewed',
-  'accepted',
-  'rejected',
-  'failed',
-  'cancelled'
-] as const
-export type AttemptStatus = (typeof statuses)[number]
-
 const nodeSchema = z.object({
   class_type: z.string(),
   inputs: z.record(z.union([z.string(), z.number(), z.boolean()]))
@@ -107,17 +95,6 @@ const reviewRowSchema = z.object({
   report: z.string(),
   created_at: z.string()
 })
-
-/** A submission refused before any job existed spent nothing and uses no slot. */
-// `IS 0`, not `= 0`: an unknown spend (NULL) must still count.
-const refused = (a: string) =>
-  `(${a}status = 'failed' AND ${a}job_id IS NULL AND ${a}spend_usd IS 0)`
-/** Attempts that may have spent money. `a` is an optional table alias with its dot. */
-const committed = (a = '') =>
-  `${a}status NOT IN ('quoted', 'cancelled') AND NOT ${refused(a)}`
-/** Attempts that use one of the shot's slots. */
-const COUNTED = `status != 'cancelled' AND NOT ${refused('')}`
-const OPEN = `status IN ('quoted', 'approved', 'submitting', 'rendering')`
 
 export function attemptView(
   row: AttemptRow,
@@ -228,70 +205,6 @@ export async function listAttempts(
         : null
     )
   })
-}
-
-/** Spend so far: recorded spend, or the quote while spend is unknown. */
-export async function spendSummary(db: D1Database, filmId: string) {
-  const row = z
-    .object({ total: z.number().nullable(), receipts: z.number() })
-    .parse(
-      await db
-        .prepare(
-          `SELECT SUM(COALESCE(spend_usd, quote_usd, 0)) AS total, COUNT(*) AS receipts
-           FROM attempts WHERE film_id = ? AND ${committed()}`
-        )
-        .bind(filmId)
-        .first()
-    )
-  return {
-    total: Number((row.total ?? 0).toFixed(2)),
-    currency: 'USD',
-    receipts: row.receipts
-  }
-}
-
-/** Render state per shot for the film overview, keyed `<scene>/<shot>`:
- * `approved` once a take is accepted, else the latest attempt's stage. */
-export async function shotStates(db: D1Database, filmId: string) {
-  const { results } = await db
-    .prepare(
-      `SELECT scene_id, shot_id, status FROM attempts WHERE film_id = ? AND status != 'cancelled'
-       ORDER BY created_at, number`
-    )
-    .bind(filmId)
-    .all()
-  const states = new Map<
-    string,
-    'approved' | 'review' | 'rendering' | 'quoted' | 'failed'
-  >()
-  const stage = {
-    quoted: 'quoted',
-    approved: 'rendering',
-    submitting: 'rendering',
-    rendering: 'rendering',
-    rendered: 'review',
-    reviewed: 'review',
-    rejected: 'failed',
-    failed: 'failed'
-  } as const
-  for (const item of results) {
-    const row = z
-      .object({
-        scene_id: z.string(),
-        shot_id: z.string(),
-        status: z.enum(statuses)
-      })
-      .parse(item)
-    const key = `${row.scene_id}/${row.shot_id}`
-    if (states.get(key) === 'approved') continue
-    states.set(
-      key,
-      row.status === 'accepted'
-        ? 'approved'
-        : stage[row.status === 'cancelled' ? 'failed' : row.status]
-    )
-  }
-  return states
 }
 
 /** Quotes a node. A quote without a dollar amount can't be checked against the
@@ -789,16 +702,16 @@ const read = {
   timeout: '2 minutes'
 } as const
 
-export async function runAttempt(
-  id: string,
-  step: StepLike,
-  deps: { db: D1Database; engine: FilmEngine; reviewer: Reviewer }
-) {
+type Deps = { db: D1Database; engine: FilmEngine; reviewer: Reviewer }
+
+/** Waits for the owner. Returns false (and closes the quote) if approval never came. */
+async function awaitApproval(id: string, step: StepLike, deps: Deps) {
   try {
     await step.waitForEvent('owner approval', {
       type: 'approve',
       timeout: '7 days'
     })
+    return true
   } catch {
     await step.do('expire', once, async () => {
       await deps.db
@@ -809,28 +722,40 @@ export async function runAttempt(
         .bind(id)
         .run()
     })
-    return 'cancelled'
+    return false
   }
-  const job = await step.do('submit', once, () =>
-    claimAndSubmit(deps.db, deps.engine, id)
-  )
-  if (!job) return 'not submitted'
-  // The job id lives in this Workflow's step state; keep trying to record it
-  // (for about a day) rather than lose track of a paid job.
-  for (let tries = 0; ; tries++) {
+}
+
+/** The job id lives in this Workflow's step state; keep trying to record it
+ * (for about a day) rather than lose track of a paid job. */
+async function recordPatiently(
+  id: string,
+  job: string,
+  step: StepLike,
+  deps: Deps
+) {
+  for (let tries = 0; tries <= 48; tries++) {
     try {
       await step.do(tries ? `record-job-${tries}` : 'record-job', read, () =>
         recordJob(deps.db, id, job)
       )
-      break
+      return true
     } catch {
-      if (tries >= 48) return 'submitting'
       await step.sleep(`record-wait-${tries}`, '30 minutes')
     }
   }
+  return false
+}
+
+/** Follows the job until it ends. Status-read outages don't end tracking. */
+async function track(id: string, step: StepLike, deps: Deps) {
   let status: AttemptStatus = 'rendering'
   let outage = 0
-  for (let tick = 0; tick < 360 && status === 'rendering'; tick++) {
+  for (
+    let tick = 0;
+    tick < 360 && status === 'rendering' && outage < 30;
+    tick++
+  ) {
     await step.sleep(`wait-${tick}`, '20 seconds')
     try {
       status = await step.do(`check-${tick}`, read, () =>
@@ -838,10 +763,20 @@ export async function runAttempt(
       )
       outage = 0
     } catch {
-      // Status reads failed even after retries; keep tracking rather than give up.
-      if (++outage >= 30) break
+      outage++
     }
   }
+  return status
+}
+
+export async function runAttempt(id: string, step: StepLike, deps: Deps) {
+  if (!(await awaitApproval(id, step, deps))) return 'cancelled'
+  const job = await step.do('submit', once, () =>
+    claimAndSubmit(deps.db, deps.engine, id)
+  )
+  if (!job) return 'not submitted'
+  if (!(await recordPatiently(id, job, step, deps))) return 'submitting'
+  const status = await track(id, step, deps)
   if (status === 'rendering') {
     // The render may still finish: keep it open (its quote counts) and say how to resume.
     await step.do('tracking-paused', once, async () => {

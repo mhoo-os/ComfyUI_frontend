@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-import { shotStates, spendSummary } from './attempts'
+import { shotStates, spendSummary } from './attemptLedger'
 import { compileShot, compileTargets, isCompileTarget } from './compilers'
 import { boundedJson } from './http'
 import { renderBlockers, sceneSpecSchema } from './shotSpec'

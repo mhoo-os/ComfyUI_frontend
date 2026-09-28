@@ -17,8 +17,6 @@ import {
   repairAttempt,
   repairPlan,
   runAttempt,
-  shotStates,
-  spendSummary,
   submitAttempt,
   refreshAttempt,
   syncAttempt
@@ -30,6 +28,8 @@ import type {
   ReviewReport,
   StepLike
 } from './attempts'
+import { shotStates, spendSummary } from './attemptLedger'
+import { isQueueFull, jobState } from './jobLedger'
 import { createCut, cutGraph, listCuts } from './cuts'
 import type { CutEngine, CutNode } from './cuts'
 import example from './fixtures/shot-scene.example.json'
@@ -785,5 +785,46 @@ describe('re-review fixes', () => {
       'record-job-3'
     ])
     expect(engine.submitted).toHaveLength(1)
+  })
+})
+
+describe('job ledger responses', () => {
+  const job = '11111111-2222-4333-8444-555555555555'
+  it('reads the output of the requested node', () => {
+    const body = {
+      status: 'completed',
+      outputs: {
+        '1': { video: [{ filename: `${job}/1/0.mp4` }], images: [] },
+        '9': { video: [{ filename: `${job}/9/0.mp4` }] }
+      }
+    }
+    expect(jobState(body, '1')).toEqual({
+      status: 'completed',
+      output: `${job}/1/0`,
+      error: null
+    })
+    expect(jobState(body, '9').output).toBe(`${job}/9/0`)
+    expect(
+      jobState(
+        {
+          status: 'failed',
+          outputs: {},
+          execution_error: { exception_message: 'Rejected.' }
+        },
+        '1'
+      )
+    ).toEqual({ status: 'failed', output: null, error: 'Rejected.' })
+  })
+
+  it('treats only an explicit queue_full as a free refusal', () => {
+    expect(
+      isQueueFull(409, { error: { type: 'queue_full', message: 'busy' } })
+    ).toBe(true)
+    expect(
+      isQueueFull(409, { error: { type: 'higgsfield_error', message: 'x' } })
+    ).toBe(false)
+    expect(
+      isQueueFull(400, { error: { type: 'queue_full', message: 'busy' } })
+    ).toBe(false)
   })
 })
