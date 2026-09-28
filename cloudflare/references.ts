@@ -418,6 +418,7 @@ export class ReferenceLibrary {
           ![
             'image_url',
             'end_image_url',
+            'last_image_url',
             'image_urls',
             'input_images',
             'input_images_end'
@@ -442,6 +443,7 @@ export class ReferenceLibrary {
         ![
           'image_url',
           'end_image_url',
+          'last_image_url',
           'image_urls',
           'input_images',
           'input_images_end'

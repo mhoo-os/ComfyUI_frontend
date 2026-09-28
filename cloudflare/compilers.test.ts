@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { compileShot } from './compilers'
+import { compileShot, compileTargets } from './compilers'
 import example from './fixtures/shot-scene.example.json'
 import { shotSpecSchema } from './shotSpec'
 
@@ -56,6 +56,67 @@ describe('Kling 2.5 Standard compiler', () => {
     const compiled = compileShot(shot, 'kling-2.5-standard')
     expect(compiled.inputs).not.toHaveProperty('end_image_url')
     expect(compiled.notes[0]).toMatch(/End frame ignored/)
+  })
+})
+
+describe('Kling 3.0 Standard compiler', () => {
+  it('directs timed performance, camera intent and continuity with audio off', () => {
+    const compiled = compileShot(ready(), 'kling-3.0-standard')
+    expect(compiled.class_type).toBe('HiggsfieldKling3Standard')
+    expect(compiled.inputs).toEqual({
+      prompt: [
+        'Starting state: The vendor stands behind the cart, cup in hand.',
+        '0-1.5s (anticipation): Tilts the jug over the cup.',
+        '1.5-3.5s (action): Pours a steady ribbon of milk.',
+        '3.5-5s (reaction): Glances up, pleased.',
+        'Ending: The vendor smiling at a customer off-screen.',
+        "Camera: Medium shot, eye level, locked-off static camera. Keep the vendor's hands and face readable.",
+        'Keep consistent: Cup stays in the right hand.',
+        'One continuous shot. Keep the look and identity of the starting image.',
+        'Avoid: logos, brand names, readable text, extra limbs, distorted hands.'
+      ].join('\n'),
+      image_url: start,
+      duration: 5,
+      cfg_scale: 0.5,
+      sound: 'off'
+    })
+    expect(String(compiled.inputs.prompt)).not.toContain('PSSHH')
+    expect(String(compiled.inputs.prompt)).not.toContain(
+      'Every morning starts here'
+    )
+  })
+
+  it.for([
+    [2.5, 3],
+    [7.2, 8],
+    [15, 15]
+  ] as const)(
+    'renders a %s-second shot at the nearest supported %i seconds',
+    ([duration, expected]) => {
+      const beats = [{ kind: 'action', performance: 'Pours.', seconds: 2 }]
+      expect(
+        compileShot(ready({ beats, duration }), 'kling-3.0-standard').inputs
+          .duration
+      ).toBe(expected)
+    }
+  )
+
+  it('has no shot longer than the 15-second endpoint maximum to compile', () => {
+    const beats = [{ kind: 'action', performance: 'Pours.', seconds: 16 }]
+    expect(() => ready({ beats, duration: 16 })).toThrow()
+  })
+
+  it('sends an end frame as the provider last image', () => {
+    const shot = ready({
+      references: [
+        { role: 'identity', asset: identity, approved: true },
+        { role: 'start_frame', asset: start, approved: true },
+        { role: 'end_frame', asset: 'https://cdn.example.com/end.png' }
+      ]
+    })
+    expect(compileShot(shot, 'kling-3.0-standard').inputs).toMatchObject({
+      last_image_url: 'https://cdn.example.com/end.png'
+    })
   })
 })
 
@@ -131,7 +192,7 @@ describe('compile gate', () => {
       }
     ]
   ] as const)('refuses to compile with %s', ([, changes]) => {
-    for (const target of ['kling-2.5-standard', 'seedance-2.5'] as const)
+    for (const target of compileTargets)
       expect(() => compileShot(ready(changes), target)).toThrow()
   })
 })

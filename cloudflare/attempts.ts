@@ -582,6 +582,7 @@ export function repairPlan(report: ReviewReport | null, note: string | null) {
 
 const promptLimit: Record<string, number> = {
   HiggsfieldKlingDraft: 2500,
+  HiggsfieldKling3Standard: 2500,
   HiggsfieldAnimate: 5000
 }
 

@@ -18,6 +18,7 @@ import {
   unapproveAttempt
 } from './attempts'
 import type { FilmEngine, RenderNode, ReviewReport, Reviewer } from './attempts'
+import { compileTargets } from './compilers'
 import { createCut, listCuts } from './cuts'
 import type { CutEngine, CutNode } from './cuts'
 import { boundedJson } from './http'
@@ -183,7 +184,7 @@ async function quoteRoute(
   const body = createBody.safeParse(await boundedJson(request, 4096))
   if (!body.success)
     return badRequest(
-      'Use { "target": "kling-2.5-standard" | "seedance-2.5" }.'
+      `Use { "target": ${compileTargets.map((target) => `"${target}"`).join(' | ')} }.`
     )
   const row = await createAttempt(env.FILM_DB, comfyEngine(env), {
     sceneId,

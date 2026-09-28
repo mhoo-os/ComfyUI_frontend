@@ -773,6 +773,51 @@ describe('Private character reference review', () => {
     ).toBe(400)
     expect(paths).toHaveLength(1)
   })
+  it('quotes Kling 3.0 with an approved end-frame reference and no upload', async () => {
+    const sent: { path: string; body: unknown }[] = []
+    const mf = await runtime(async (request) => {
+      sent.push({
+        path: new URL(request.url).pathname,
+        body: await request.json()
+      })
+      return Response.json({ type: 'estimate', usd: '0.231', credits: '3' })
+    })
+    const asset = await describeAsset(mf, await upload(mf))
+    expect((await review(mf, asset)).status).toBe(200)
+    const response = await mf.dispatchFetch(
+      'https://test/higgsfield/estimate',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          prompt: {
+            '1': {
+              class_type: 'HiggsfieldKling3Standard',
+              inputs: {
+                prompt: 'A person crosses the room.',
+                image_url: 'https://cdn.example.com/room.png',
+                end_image_url: `mhoo-asset:${asset.id}:${asset.revision}`,
+                sound: 'off'
+              }
+            }
+          }
+        })
+      }
+    )
+    expect(await response.json()).toMatchObject({ usd: '0.231' })
+    expect(sent).toEqual([
+      {
+        path: '/estimate/kling-video/v3.0/std/image-to-video',
+        body: {
+          prompt: expect.stringContaining('A person crosses the room.'),
+          image_url: 'https://cdn.example.com/room.png',
+          last_image_url: 'https://example.com/approved-reference.jpg',
+          duration: 5,
+          cfg_scale: 0.5,
+          sound: 'off'
+        }
+      }
+    ])
+  })
   it('resolves approved bytes only at execution and never sends a private token to generation', async () => {
     const paths: string[] = []
     const mf = await runtime(async (request) => {
