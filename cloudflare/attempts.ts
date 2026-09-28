@@ -169,6 +169,10 @@ export class AttemptError extends Error {
   }
 }
 
+/** The engine refused before any job existed (the job ledger's queue_full),
+ * so nothing was spent. Every other submission error is an unknown outcome. */
+export class RefusedError extends AttemptError {}
+
 async function getRow(db: D1Database, id: string) {
   const row = await db
     .prepare('SELECT * FROM attempts WHERE id = ?')
@@ -462,12 +466,9 @@ export async function cancelAttempt(
 }
 
 /** Workflow step: claims the approval and submits once. Returns the job id, or
- * null when there is nothing to submit. Any failure is recorded, not retried. */
-export async function submitAttempt(
-  db: D1Database,
-  engine: FilmEngine,
-  id: string
-) {
+ * null when there is nothing to submit. A failure is recorded, never retried.
+ * The job id is written by a separate step, so a failed write can't lose it. */
+async function claimAndSubmit(db: D1Database, engine: FilmEngine, id: string) {
   const claimed = await db
     .prepare(
       "UPDATE attempts SET status = 'submitting' WHERE id = ? AND status = 'approved' RETURNING *"
@@ -476,14 +477,12 @@ export async function submitAttempt(
     .first()
   if (!claimed) return null
   const row = rowSchema.parse(claimed)
-  let jobId: string
   try {
-    jobId = await engine.submit(nodeSchema.parse(JSON.parse(row.request)))
+    return await engine.submit(nodeSchema.parse(JSON.parse(row.request)))
   } catch (error) {
     const message =
       error instanceof Error ? error.message : 'Submission failed.'
-    // A refusal before any job existed spent nothing. Anything else is unknown.
-    const refused = error instanceof AttemptError
+    const refused = error instanceof RefusedError
     await db
       .prepare(
         `UPDATE attempts SET status = 'failed', error = ?2, spend_usd = ?3, finished_at = datetime('now')
@@ -499,12 +498,26 @@ export async function submitAttempt(
       .run()
     return null
   }
+}
+
+/** Workflow step (retried): records the submitted job. */
+async function recordJob(db: D1Database, id: string, jobId: string) {
   await db
     .prepare(
       "UPDATE attempts SET status = 'rendering', job_id = ?2 WHERE id = ?1 AND status = 'submitting'"
     )
     .bind(id, jobId)
     .run()
+}
+
+/** Both submission steps in one call, for callers outside a Workflow. */
+export async function submitAttempt(
+  db: D1Database,
+  engine: FilmEngine,
+  id: string
+) {
+  const jobId = await claimAndSubmit(db, engine, id)
+  if (jobId) await recordJob(db, id, jobId)
   return jobId
 }
 
@@ -535,6 +548,17 @@ export async function syncAttempt(
     )
     .run()
   return done ? 'rendered' : 'failed'
+}
+
+/** Owner-triggered "Check again" for a render whose tracking paused. */
+export async function refreshAttempt(
+  db: D1Database,
+  engine: FilmEngine,
+  reviewer: Reviewer,
+  id: string
+) {
+  const status = await syncAttempt(db, engine, id)
+  if (status === 'rendered') await reviewAttempt(db, reviewer, id)
 }
 
 /** Workflow step: stores the automated review. The owner still decides. */
@@ -788,29 +812,36 @@ export async function runAttempt(
     return 'cancelled'
   }
   const job = await step.do('submit', once, () =>
-    submitAttempt(deps.db, deps.engine, id)
+    claimAndSubmit(deps.db, deps.engine, id)
   )
   if (!job) return 'not submitted'
+  await step.do('record-job', read, () => recordJob(deps.db, id, job))
   let status: AttemptStatus = 'rendering'
+  let outage = 0
   for (let tick = 0; tick < 360 && status === 'rendering'; tick++) {
     await step.sleep(`wait-${tick}`, '20 seconds')
-    status = await step.do(`check-${tick}`, read, () =>
-      syncAttempt(deps.db, deps.engine, id)
-    )
+    try {
+      status = await step.do(`check-${tick}`, read, () =>
+        syncAttempt(deps.db, deps.engine, id)
+      )
+      outage = 0
+    } catch {
+      // Status reads failed even after retries; keep tracking rather than give up.
+      if (++outage >= 30) break
+    }
   }
   if (status === 'rendering') {
-    // The job ledger stops polling after an hour, so this is a stuck record, not a live render.
-    await step.do('tracking-stopped', once, async () => {
+    // The render may still finish: keep it open (its quote counts) and say how to resume.
+    await step.do('tracking-paused', once, async () => {
       await deps.db
         .prepare(
-          `UPDATE attempts SET status = 'failed', spend_usd = quote_usd, finished_at = datetime('now'),
-             error = 'Tracking stopped before the render finished. Check the job history; nothing was retried.'
+          `UPDATE attempts SET error = 'Tracking paused before the render finished. Use Check again; nothing was retried.'
            WHERE id = ? AND status = 'rendering'`
         )
         .bind(id)
         .run()
     })
-    return 'failed'
+    return 'rendering'
   }
   if (status !== 'rendered') return status
   await step.do(

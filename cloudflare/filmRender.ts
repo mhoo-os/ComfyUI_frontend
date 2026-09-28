@@ -4,6 +4,7 @@ import { z } from 'zod'
 
 import {
   AttemptError,
+  RefusedError,
   approveAttempt,
   attemptView,
   cancelAttempt,
@@ -11,6 +12,7 @@ import {
   decideAttempt,
   getAttempt,
   listAttempts,
+  refreshAttempt,
   repairAttempt,
   runAttempt,
   unapproveAttempt
@@ -85,12 +87,13 @@ function comfyEngine(env: Env): FilmEngine & CutEngine {
   const submitGraph = async (graph: Record<string, CutNode | RenderNode>) => {
     const response = await call('/prompt', { prompt: graph, client_id: 'film' })
     const body: unknown = await response.json().catch(() => null)
+    if (response.status === 409)
+      throw new RefusedError(
+        message(body, 'Another render is running. Try again when it finishes.')
+      )
     if (!response.ok)
-      throw new AttemptError(
-        message(
-          body,
-          `The job ledger refused the render (HTTP ${response.status}).`
-        )
+      throw new Error(
+        message(body, `The job ledger answered HTTP ${response.status}.`)
       )
     return z.object({ prompt_id: z.string() }).parse(body).prompt_id
   }
@@ -168,7 +171,7 @@ const createPath = new RegExp(
 const listPath = new RegExp(`^/film/scenes/${slug}/attempts$`, 'u')
 const cutsPath = new RegExp(`^/film/scenes/${slug}/cuts$`, 'u')
 const attemptPath = new RegExp(
-  `^/film/attempts/${uuid}(?:/(approve|cancel|accept|reject|repair))?$`,
+  `^/film/attempts/${uuid}(?:/(approve|cancel|accept|reject|repair|refresh))?$`,
   'u'
 )
 const createBody = z.object({ target: z.string().max(40) }).strict()
@@ -258,6 +261,8 @@ export async function attemptRoute(request: Request, env: Env, path: string) {
       await env.FILM_RENDER.get(id)
         .then((instance) => instance.terminate())
         .catch(() => {})
+    } else if (action === 'refresh') {
+      await refreshAttempt(db, comfyEngine(env), comfyReviewer(env), id)
     } else if (action === 'accept' || action === 'reject') {
       await decideAttempt(db, id, action)
     } else {

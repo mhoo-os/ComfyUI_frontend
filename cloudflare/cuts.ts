@@ -118,9 +118,10 @@ export async function createCut(
     throw new AttemptError('Scene not found or invalid.', 404)
   const { results } = await db
     .prepare(
-      "SELECT id, shot_id, output FROM attempts WHERE scene_id = ? AND status = 'accepted' AND output IS NOT NULL"
+      "SELECT id, shot_id, output FROM attempts WHERE scene_id = ? AND scene_version = ? AND status = 'accepted' AND output IS NOT NULL"
     )
-    .bind(scene.id)
+    // Only takes accepted against this version: a revised shot needs a new take.
+    .bind(scene.id, scene.version)
     .all()
   const accepted = new Map(
     results.map((item) => {
@@ -133,7 +134,7 @@ export async function createCut(
   const missing = scene.scene.shots.filter((shot) => !accepted.has(shot.id))
   if (missing.length)
     throw new AttemptError(
-      `Every shot needs an accepted take first. Missing: ${missing.map((shot) => shot.id).join(', ')}.`
+      `Every shot needs a take accepted for spec v${scene.version}. Missing: ${missing.map((shot) => shot.id).join(', ')}.`
     )
   const takes = scene.scene.shots.map((shot) => {
     const take = accepted.get(shot.id)

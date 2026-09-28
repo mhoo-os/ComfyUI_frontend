@@ -5,6 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import {
   AttemptError,
+  RefusedError,
   applyRepair,
   approveAttempt,
   caps,
@@ -19,6 +20,7 @@ import {
   shotStates,
   spendSummary,
   submitAttempt,
+  refreshAttempt,
   syncAttempt
 } from './attempts'
 import type {
@@ -76,7 +78,7 @@ function fakeEngine(): Engine {
     },
     async submit(node) {
       if (engine.refuse)
-        throw new AttemptError('A workflow is already running.')
+        throw new RefusedError('A workflow is already running.')
       if (engine.crash) throw new Error('Network lost.')
       engine.submitted.push(node)
       return '11111111-2222-4333-8444-555555555555'
@@ -607,7 +609,7 @@ describe('episode cut', () => {
 
   it('needs an accepted take for every shot', async () => {
     await expect(createCut(db, cutEngine(), 'coffee-cart')).rejects.toThrow(
-      /accepted take first/
+      /needs a take accepted/
     )
   })
 
@@ -637,5 +639,108 @@ describe('episode cut', () => {
       status: 'done',
       output: `99999999-2222-4333-8444-555555555555/${readyScene.shots.length + 3}/0`
     })
+  })
+})
+
+describe('review fixes', () => {
+  it('counts any submission error other than a refusal as possibly spent', async () => {
+    const engine = fakeEngine()
+    engine.submit = async () => {
+      throw new AttemptError('HTTP 400 after the job was stored.')
+    }
+    const attempt = await quoteShot(engine)
+    await approveAttempt(db, attempt.id)
+    await submitAttempt(db, engine, attempt.id)
+    expect(await getAttempt(db, attempt.id)).toMatchObject({
+      status: 'failed',
+      spendUsd: null
+    })
+    expect((await spendSummary(db, 'example-film')).total).toBe(1.5)
+  })
+
+  it('submits and records the job in separate steps, and survives a status outage', async () => {
+    const engine = fakeEngine()
+    const attempt = await quoteShot(engine)
+    await approveAttempt(db, attempt.id)
+    let reads = 0
+    const flaky: FilmEngine = {
+      ...engine,
+      async job() {
+        reads++
+        if (reads <= 30) throw new Error('Status unavailable.')
+        return {
+          status: 'completed',
+          output: '11111111-2222-4333-8444-555555555555/1/0',
+          error: null
+        }
+      }
+    }
+    const names: string[] = []
+    const step: StepLike = {
+      async do(name, _config, fn) {
+        names.push(name)
+        return fn()
+      },
+      async sleep() {},
+      async waitForEvent() {
+        return { type: 'approve' }
+      }
+    }
+    expect(
+      await runAttempt(attempt.id, step, {
+        db,
+        engine: flaky,
+        reviewer: async () => report()
+      })
+    ).toBe('rendering')
+    expect(names.slice(0, 2)).toEqual(['submit', 'record-job'])
+    const paused = await getAttempt(db, attempt.id)
+    expect(paused).toMatchObject({
+      status: 'rendering',
+      job: '11111111-2222-4333-8444-555555555555'
+    })
+    expect(paused?.error).toMatch(/Check again/)
+    await refreshAttempt(db, flaky, async () => report(), attempt.id)
+    expect(await getAttempt(db, attempt.id)).toMatchObject({
+      status: 'reviewed',
+      error: null
+    })
+    expect(engine.submitted).toHaveLength(1)
+  })
+
+  it('cuts only use takes accepted against the current scene version', async () => {
+    const engine = fakeEngine()
+    engine.state = {
+      status: 'completed',
+      output: '11111111-2222-4333-8444-555555555555/1/0',
+      error: null
+    }
+    for (const shot of readyScene.shots) {
+      const attempt = await createAttempt(db, engine, {
+        sceneId: 'coffee-cart',
+        shotId: shot.id,
+        target: 'kling-2.5-standard'
+      })
+      await approveAttempt(db, attempt.id)
+      await runAttempt(attempt.id, fakeStep({ approve: true }).step, {
+        db,
+        engine,
+        reviewer: async () => report()
+      })
+      await decideAttempt(db, attempt.id, 'accept')
+    }
+    await db
+      .prepare(
+        "INSERT INTO scenes (id, version, film_id, episode, title, spec) VALUES ('coffee-cart', 2, 'example-film', 1, 'Coffee cart', ?)"
+      )
+      .bind(JSON.stringify(readyScene))
+      .run()
+    const cutter: CutEngine = {
+      submitGraph: async () => 'x',
+      job: async () => engine.state
+    }
+    await expect(createCut(db, cutter, 'coffee-cart')).rejects.toThrow(
+      /accepted for spec v2/
+    )
   })
 })
