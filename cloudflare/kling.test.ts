@@ -72,7 +72,7 @@ describe('Kling 3.0 Standard submission boundary', () => {
     })
   })
 
-  it('keeps the provider default of generated sound when unset', () => {
+  it('never bills generated sound unless it is switched on', () => {
     const plan = planGraph({
       shot: {
         class_type: 'HiggsfieldKling3Standard',
@@ -81,7 +81,7 @@ describe('Kling 3.0 Standard submission boundary', () => {
     })
     expect(resolveInputs(plan.graph.shot, {})).toMatchObject({
       duration: 5,
-      sound: 'on'
+      sound: 'off'
     })
   })
 

@@ -326,7 +326,7 @@
         "sound": {
           "type": "string",
           "enum": ["on", "off"],
-          "default": "on"
+          "default": "off"
         }
       },
       "required": ["image_url"]
