@@ -469,6 +469,53 @@ describe('Concurrent jobs', () => {
     })
   })
 
+  it('stops following only the node whose status keeps failing', async () => {
+    const { state, handler } = provider()
+    const mf = await runtime(async (request) =>
+      request.method === 'GET' &&
+      new URL(request.url).pathname.includes(state.ids[0])
+        ? new Response('Unavailable', { status: 503 })
+        : handler(request)
+    )
+    const job = await queue(mf, {
+      '1': { class_type: 'HiggsfieldSoul', inputs: { prompt: 'A lake' } },
+      '2': { class_type: 'HiggsfieldSoul', inputs: { prompt: 'A forest' } }
+    })
+    for (let i = 0; i < 12; i++) await tick(mf)
+    expect((await statusOf(mf, job.prompt_id)).status).toBe('in_progress')
+    state.outcome.set(state.ids[1], 'completed')
+    await tick(mf)
+    expect(state.submissions).toBe(2)
+    expect(await jobs(mf)).toMatchObject({
+      jobs: [
+        {
+          status: 'failed',
+          outputs_count: 1,
+          execution_error: { node_id: '1' }
+        }
+      ]
+    })
+  })
+
+  it('leaves a job alone while another wake-up is still advancing it', async () => {
+    const mf = await runtime(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      return new Response('finished-mp4', {
+        headers: { 'content-type': 'video/mp4', 'content-length': '12' }
+      })
+    })
+    const job = await queue(mf, finishingChain(await uploadClip(mf)))
+    for (let i = 0; i < 3; i++) await tick(mf)
+    await Promise.all([
+      tick(mf),
+      new Promise((resolve) => setTimeout(resolve, 100)).then(() => tick(mf))
+    ])
+    expect(await statusOf(mf, job.prompt_id)).toMatchObject({
+      status: 'completed',
+      outputs_count: 1
+    })
+  })
+
   it('keeps following a job saved by the single-slot ledger without resubmitting it', async () => {
     const { state, handler } = provider()
     const mf = await runtime(handler)

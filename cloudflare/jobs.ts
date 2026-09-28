@@ -33,7 +33,13 @@ const maxNodesInFlight = 4
 
 /** One paid node at the provider. `submitting` is set before the request is
  * sent, so finding it set later means the outcome is unknown. */
-type NodeRun = { requestId?: string; submitting?: boolean; status?: string }
+type NodeRun = {
+  requestId?: string
+  submitting?: boolean
+  status?: string
+  /** Consecutive failed status reads. */
+  errors?: number
+}
 type Job = {
   id: string
   graph: Graph
@@ -258,8 +264,13 @@ export class ComfyJobs extends DurableObject<Env> {
     const finished = await this.ctx.blockConcurrencyWhile(async () => {
       const ids = await this.active()
       if (!ids.includes(job.id)) return false
-      job.status = status
-      job.error = error
+      // A cancel accepted after the last save still wins over completion.
+      const stored = await this.ctx.storage.get<Job>(`job:${job.id}`)
+      const cancelled = status === 'completed' && stored?.cancelRequested
+      job.status = cancelled ? 'cancelled' : status
+      job.error = cancelled
+        ? 'Workflow cancelled. Completed outputs remain in history.'
+        : error
       job.due = undefined
       job.updated = Date.now()
       await this.ctx.storage.put(`job:${job.id}`, job)
@@ -268,7 +279,7 @@ export class ComfyJobs extends DurableObject<Env> {
       return true
     })
     if (!finished) return
-    if (status === 'completed')
+    if (job.status === 'completed')
       this.broadcast('execution_success', {
         prompt_id: job.id,
         timestamp: Date.now()
@@ -278,7 +289,7 @@ export class ComfyJobs extends DurableObject<Env> {
         prompt_id: job.id,
         node_id: currentNode(job),
         node_type: 'Higgsfield',
-        exception_message: error ?? 'Generation cancelled.',
+        exception_message: job.error ?? 'Generation cancelled.',
         exception_type: 'HiggsfieldError',
         traceback: [],
         executed: Object.keys(job.outputs),
@@ -612,11 +623,20 @@ export class ComfyJobs extends DurableObject<Env> {
     await this.rearm()
   }
 
+  /** Jobs this instance is advancing now; a second wake-up leaves them be. */
+  private waking = new Set<string>()
+
   private async wake(job: Job) {
-    job.due = Date.now() + 60_000
-    await this.save(job)
-    if (job.runner === 'workflow') return this.startWorkflow(job)
-    return this.advance(job)
+    if (this.waking.has(job.id)) return
+    this.waking.add(job.id)
+    try {
+      job.due = Date.now() + 60_000
+      await this.save(job)
+      if (job.runner === 'workflow') await this.startWorkflow(job)
+      else await this.advance(job)
+    } finally {
+      this.waking.delete(job.id)
+    }
   }
 
   /** Starts (or checks) the durable workflow that drives a talking-shot job. */
@@ -854,29 +874,23 @@ export class ComfyJobs extends DurableObject<Env> {
   /** Polls every submitted node. Returns false when the job already ended or
    * a status read failed (the next tick is then already scheduled). */
   // fallow-ignore-next-line complexity
+  /** Polls every submitted node. Returns false when a status read failed
+   * and nodes are still running (the next tick is then already scheduled). */
   private async pollRunning(job: Active) {
-    let failure: unknown
+    let failed = false
     for (const [nodeId, run] of Object.entries(job.running)) {
       if (!run.requestId) continue
       try {
         await this.pollNode(job, nodeId, run.requestId)
       } catch (error) {
-        failure = error
+        failed = true
+        pollFailed(job, nodeId, error)
       }
     }
-    if (failure === undefined) {
-      job.pollErrors = 0
-      job.lastPollError = undefined
-      return true
-    }
-    job.pollErrors = (job.pollErrors ?? 0) + 1
-    job.lastPollError =
-      failure instanceof Error ? failure.message : 'Provider status unavailable'
-    if (job.pollErrors < 12) {
-      await this.schedule(job, 15000)
-      return false
-    }
-    await this.finish(job, 'failed', job.lastPollError)
+    job.pollErrors = failed ? (job.pollErrors ?? 0) + 1 : 0
+    if (!failed) job.lastPollError = undefined
+    if (!failed || !Object.keys(job.running).length) return true
+    await this.schedule(job, 15000)
     return false
   }
 
@@ -898,7 +912,10 @@ export class ComfyJobs extends DurableObject<Env> {
       await this.save(job)
       return
     }
-    if (result.status !== 'completed') return
+    if (result.status !== 'completed') {
+      job.running[nodeId] = { ...job.running[nodeId], errors: 0 }
+      return
+    }
     const media = resultMedia(result)
     if (!media.length)
       throw new Error('Higgsfield completed without supported media outputs.')
@@ -937,6 +954,22 @@ function settledOutcome(
   if (job.done.length >= job.order.length) return { status: 'completed' }
   if (job.halted && !Object.keys(job.running).length) return job.halted
   return null
+}
+
+/** Counts a failed status read against one node. After twelve in a row the
+ * node stops being followed (its paid output may exist at the provider) and
+ * the job ends once its other running nodes settle. */
+function pollFailed(job: Active, nodeId: string, error: unknown) {
+  const message =
+    error instanceof Error ? error.message : 'Provider status unavailable'
+  const errors = (job.running[nodeId].errors ?? 0) + 1
+  job.lastPollError = message
+  if (errors < 12) {
+    job.running[nodeId] = { ...job.running[nodeId], errors }
+    return
+  }
+  delete job.running[nodeId]
+  job.halted ??= { status: 'failed', error: message, node: nodeId }
 }
 
 /** Every save picks up a cancel request from storage, so read this fresh. */
