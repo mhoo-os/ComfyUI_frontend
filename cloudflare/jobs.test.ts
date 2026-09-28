@@ -246,7 +246,7 @@ describe('Concurrent jobs', () => {
       submissions: 0,
       cancels: 0,
       ids: [] as string[],
-      outcome: new Map<string, 'completed' | 'failed'>()
+      outcome: new Map<string, 'completed' | 'failed' | 'canceled'>()
     }
     const handler = async (request: MiniflareRequest) => {
       const path = new URL(request.url).pathname
@@ -514,6 +514,42 @@ describe('Concurrent jobs', () => {
       status: 'completed',
       outputs_count: 1
     })
+  })
+
+  it('submits nothing new after a cancel the provider only partly accepted', async () => {
+    const { state, handler } = provider()
+    const mf = await runtime(async (request) => {
+      const path = new URL(request.url).pathname
+      if (path.endsWith('/cancel')) {
+        state.cancels++
+        return path.includes(state.ids[0])
+          ? new Response(null, { status: 202 })
+          : new Response('Already processing', { status: 409 })
+      }
+      return handler(request)
+    })
+    const job = await queue(mf, {
+      '1': { class_type: 'HiggsfieldSoul', inputs: { prompt: 'A lake' } },
+      '2': { class_type: 'HiggsfieldSoul', inputs: { prompt: 'A forest' } },
+      '3': {
+        class_type: 'HiggsfieldAnimate',
+        inputs: { image_url: ['2', 0], prompt: 'Wind' }
+      }
+    })
+    await tick(mf)
+    await mf.dispatchFetch(`https://test/jobs/${job.prompt_id}/cancel`, {
+      method: 'POST'
+    })
+    await tick(mf)
+    expect(state.cancels).toBe(2)
+    // The accepted cancel hasn't reached the first request's status yet.
+    state.outcome.set(state.ids[1], 'completed')
+    for (let i = 0; i < 3; i++) await tick(mf)
+    expect(state.submissions).toBe(2)
+    state.outcome.set(state.ids[0], 'canceled')
+    await tick(mf)
+    expect(state.submissions).toBe(2)
+    expect((await statusOf(mf, job.prompt_id)).status).toBe('cancelled')
   })
 
   it('keeps following a job saved by the single-slot ledger without resubmitting it', async () => {

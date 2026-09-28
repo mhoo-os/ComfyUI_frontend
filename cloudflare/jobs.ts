@@ -727,7 +727,15 @@ export class ComfyJobs extends DurableObject<Env> {
       try {
         await provider(this.env, `requests/${run.requestId}/cancel`, {})
       } catch {
+        // Stop asking, but keep the cancellation: nothing new is submitted,
+        // and requests still running are followed to the end.
         job.cancelRequested = false
+        job.halted ??= {
+          status: 'cancelled',
+          error:
+            'Workflow cancelled. Higgsfield could not cancel every running request; those were followed to the end.',
+          node: currentNode(job)
+        }
         await this.ctx.storage.put(`job:${job.id}`, job)
         this.broadcast('notification', {
           value:
