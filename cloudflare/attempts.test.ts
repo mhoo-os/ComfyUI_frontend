@@ -744,3 +744,46 @@ describe('review fixes', () => {
     )
   })
 })
+
+describe('re-review fixes', () => {
+  it('keeps trying to record a submitted job through a database outage', async () => {
+    const engine = fakeEngine()
+    engine.state = {
+      status: 'completed',
+      output: '11111111-2222-4333-8444-555555555555/1/0',
+      error: null
+    }
+    const attempt = await quoteShot(engine)
+    await approveAttempt(db, attempt.id)
+    let failures = 3
+    const names: string[] = []
+    const step: StepLike = {
+      async do(name, _config, fn) {
+        names.push(name)
+        if (name.startsWith('record-job') && failures-- > 0)
+          throw new Error('D1 unavailable.')
+        return fn()
+      },
+      async sleep(name) {
+        names.push(name)
+      },
+      async waitForEvent() {
+        return { type: 'approve' }
+      }
+    }
+    expect(
+      await runAttempt(attempt.id, step, {
+        db,
+        engine,
+        reviewer: async () => report()
+      })
+    ).toBe('reviewed')
+    expect(names.filter((name) => name.startsWith('record-job'))).toEqual([
+      'record-job',
+      'record-job-1',
+      'record-job-2',
+      'record-job-3'
+    ])
+    expect(engine.submitted).toHaveLength(1)
+  })
+})

@@ -40,6 +40,9 @@ const message = (body: unknown, fallback: string) => {
     : parsed.data.error.message
 }
 
+const queueFull = z
+  .object({ error: z.object({ type: z.literal('queue_full') }).passthrough() })
+  .passthrough()
 const estimateSchema = z.union([
   z
     .object({
@@ -87,7 +90,8 @@ function comfyEngine(env: Env): FilmEngine & CutEngine {
   const submitGraph = async (graph: Record<string, CutNode | RenderNode>) => {
     const response = await call('/prompt', { prompt: graph, client_id: 'film' })
     const body: unknown = await response.json().catch(() => null)
-    if (response.status === 409)
+    // Only the ledger's explicit queue_full is known to have created no job.
+    if (response.status === 409 && queueFull.safeParse(body).success)
       throw new RefusedError(
         message(body, 'Another render is running. Try again when it finishes.')
       )

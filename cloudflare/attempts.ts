@@ -815,7 +815,19 @@ export async function runAttempt(
     claimAndSubmit(deps.db, deps.engine, id)
   )
   if (!job) return 'not submitted'
-  await step.do('record-job', read, () => recordJob(deps.db, id, job))
+  // The job id lives in this Workflow's step state; keep trying to record it
+  // (for about a day) rather than lose track of a paid job.
+  for (let tries = 0; ; tries++) {
+    try {
+      await step.do(tries ? `record-job-${tries}` : 'record-job', read, () =>
+        recordJob(deps.db, id, job)
+      )
+      break
+    } catch {
+      if (tries >= 48) return 'submitting'
+      await step.sleep(`record-wait-${tries}`, '30 minutes')
+    }
+  }
   let status: AttemptStatus = 'rendering'
   let outage = 0
   for (let tick = 0; tick < 360 && status === 'rendering'; tick++) {
