@@ -264,13 +264,8 @@ export class ComfyJobs extends DurableObject<Env> {
     const finished = await this.ctx.blockConcurrencyWhile(async () => {
       const ids = await this.active()
       if (!ids.includes(job.id)) return false
-      // A cancel accepted after the last save still wins over completion.
       const stored = await this.ctx.storage.get<Job>(`job:${job.id}`)
-      const cancelled = status === 'completed' && stored?.cancelRequested
-      job.status = cancelled ? 'cancelled' : status
-      job.error = cancelled
-        ? 'Workflow cancelled. Completed outputs remain in history.'
-        : error
+      Object.assign(job, finalState(stored, status, error))
       job.due = undefined
       job.updated = Date.now()
       await this.ctx.storage.put(`job:${job.id}`, job)
@@ -873,9 +868,9 @@ export class ComfyJobs extends DurableObject<Env> {
 
   /** Polls every submitted node. Returns false when the job already ended or
    * a status read failed (the next tick is then already scheduled). */
-  // fallow-ignore-next-line complexity
   /** Polls every submitted node. Returns false when a status read failed
    * and nodes are still running (the next tick is then already scheduled). */
+  // fallow-ignore-next-line complexity
   private async pollRunning(job: Active) {
     let failed = false
     for (const [nodeId, run] of Object.entries(job.running)) {
@@ -956,12 +951,28 @@ function settledOutcome(
   return null
 }
 
+const reason = (error: unknown, fallback: string) =>
+  error instanceof Error ? error.message : fallback
+
+/** A cancel accepted after the job's last save still wins over completion. */
+function finalState(
+  stored: Job | undefined,
+  status: Job['status'],
+  error: string | undefined
+): { status: Job['status']; error: string | undefined } {
+  if (status === 'completed' && stored?.cancelRequested)
+    return {
+      status: 'cancelled',
+      error: 'Workflow cancelled. Completed outputs remain in history.'
+    }
+  return { status, error }
+}
+
 /** Counts a failed status read against one node. After twelve in a row the
  * node stops being followed (its paid output may exist at the provider) and
  * the job ends once its other running nodes settle. */
 function pollFailed(job: Active, nodeId: string, error: unknown) {
-  const message =
-    error instanceof Error ? error.message : 'Provider status unavailable'
+  const message = reason(error, 'Provider status unavailable')
   const errors = (job.running[nodeId].errors ?? 0) + 1
   job.lastPollError = message
   if (errors < 12) {
