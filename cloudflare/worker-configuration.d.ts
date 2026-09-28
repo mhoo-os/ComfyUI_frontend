@@ -16,6 +16,9 @@ interface __BaseEnv_Env {
   COMFY_PRODUCTION: Workflow<
     Parameters<import('./worker').ComfyProduction['run']>[0]['payload']
   >
+  FILM_RENDER: Workflow<
+    Parameters<import('./worker').FilmRender['run']>[0]['payload']
+  >
 }
 declare namespace Cloudflare {
   interface GlobalProps {

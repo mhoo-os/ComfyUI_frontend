@@ -403,33 +403,62 @@ export const reviewRequestSchema = z
   })
   .strict()
 
-/** POST /review: reviews one archived job output against a stored shot spec.
- * Read-only toward providers: it never submits or retries a generation. */
-export async function reviewRoute(request: Request, env: Env, body: unknown) {
-  const input = reviewRequestSchema.parse(body)
-  const scene = await loadScene(env.FILM_DB, input.sceneId)
-  if (!scene || !scene.valid)
-    return Response.json(
-      { error: 'Scene not found or invalid.' },
-      { status: 404 }
-    )
-  const shot = scene.scene.shots.find((item) => item.id === input.shotId)
-  if (!shot) return Response.json({ error: 'Shot not found.' }, { status: 404 })
-  const view = new URL(request.url)
-  view.pathname = '/view'
-  view.search = `filename=${encodeURIComponent(input.output)}`
+/** Opens an archived job output (`<job>/<node>/<i>`) through the job ledger. */
+async function openClip(env: Env, origin: string, output: string) {
+  const view = new URL('/view', origin)
+  view.search = `filename=${encodeURIComponent(output)}`
   let media = await env.COMFY_JOBS.getByName('owner').fetch(
     new Request(view, { redirect: 'manual' })
   )
   const location = media.headers.get('location')
   if (media.status === 302 && location?.startsWith('https://'))
     media = await fetch(location, { redirect: 'error' })
-  if (!media.ok || !media.body)
-    return Response.json({ error: 'Clip not found.' }, { status: 404 })
-  return Response.json({
+  return media.ok && media.body ? media.body : null
+}
+
+/** Reviews an output against the shot as it was in the given scene version. */
+export async function reviewOutput(
+  env: Env,
+  input: {
+    sceneId: string
+    version?: number
+    shotId: string
+    output: string
+    count?: number
+  },
+  origin = 'https://mhoo.internal'
+) {
+  const scene = await loadScene(
+    env.FILM_DB,
+    input.sceneId,
+    undefined,
+    input.version
+  )
+  if (!scene || !scene.valid) throw new Error('Scene not found or invalid.')
+  const shot = scene.scene.shots.find((item) => item.id === input.shotId)
+  if (!shot) throw new Error('Shot not found.')
+  const clip = await openClip(env, origin, input.output)
+  if (!clip) throw new Error('Clip not found.')
+  return {
     scene: scene.id,
     sceneVersion: scene.version,
     output: input.output,
-    ...(await reviewClip(env, shot, media.body, input.count))
-  })
+    ...(await reviewClip(env, shot, clip, input.count))
+  }
+}
+
+/** POST /review: reviews one archived job output against a stored shot spec.
+ * Read-only toward providers: it never submits or retries a generation. */
+export async function reviewRoute(request: Request, env: Env, body: unknown) {
+  const input = reviewRequestSchema.parse(body)
+  try {
+    return Response.json(
+      await reviewOutput(env, input, new URL(request.url).origin)
+    )
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Review failed.'
+    if (/^(Scene not found|Shot not found|Clip not found)/u.test(message))
+      return Response.json({ error: message }, { status: 404 })
+    throw error
+  }
 }

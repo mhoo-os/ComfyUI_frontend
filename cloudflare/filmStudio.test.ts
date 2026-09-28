@@ -62,7 +62,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   const db = await mf.getD1Database('FILM_DB')
   await db.exec(
-    'DROP TABLE IF EXISTS cast_members; DROP TABLE IF EXISTS episodes; DROP TABLE IF EXISTS scenes; DROP TABLE IF EXISTS documents; DROP TABLE IF EXISTS films;'
+    'DROP TABLE IF EXISTS reviews; DROP TABLE IF EXISTS attempts; DROP TABLE IF EXISTS cast_members; DROP TABLE IF EXISTS episodes; DROP TABLE IF EXISTS scenes; DROP TABLE IF EXISTS documents; DROP TABLE IF EXISTS films;'
   )
   for (const file of readdirSync('cloudflare/migrations').sort()) {
     const sql = readFileSync(`cloudflare/migrations/${file}`, 'utf8')
@@ -136,6 +136,94 @@ const read = async <T extends z.ZodTypeAny>(
 ): Promise<z.infer<T>> => schema.parse(await response.json())
 const castSchema = z.object({
   cast: z.array(z.object({ id: z.string(), status: z.string() }))
+})
+
+describe('render attempts', () => {
+  const attempt = (id: string, status: string, spend: number | null) =>
+    mf.getD1Database('FILM_DB').then((db) =>
+      db
+        .prepare(
+          `INSERT INTO attempts (id, film_id, episode, scene_id, scene_version, shot_id, target, number, request, quote_usd, spend_usd, status)
+           VALUES (?, 'example-film', 1, 'coffee-cart', 1, 's01-pour', 'kling-2.5-standard', 1, '{"class_type":"HiggsfieldKlingDraft","inputs":{}}', 1.25, ?, ?)`
+        )
+        .bind(id, spend, status)
+        .run()
+    )
+
+  it("lists a scene's attempts for the owner only", async () => {
+    await attempt('00000000-0000-4000-8000-00000000000a', 'reviewed', 1.25)
+    const response = await call('/scenes/coffee-cart/attempts?shot=s01-pour')
+    expect(response.status).toBe(200)
+    const body = await read(
+      response,
+      z.object({
+        attempts: z.array(
+          z.object({
+            id: z.string(),
+            status: z.string(),
+            spendUsd: z.number().nullable()
+          })
+        )
+      })
+    )
+    expect(body.attempts).toEqual([
+      expect.objectContaining({ status: 'reviewed', spendUsd: 1.25 })
+    ])
+    expect(
+      (await call('/scenes/coffee-cart/attempts', { as: stranger })).status
+    ).toBe(403)
+    expect(
+      (await call('/attempts/00000000-0000-4000-8000-00000000000a')).status
+    ).toBe(200)
+    expect(
+      (await call('/attempts/00000000-0000-4000-8000-00000000000b')).status
+    ).toBe(404)
+  })
+
+  it('refuses attempt writes from another origin or a non-owner', async () => {
+    await attempt('00000000-0000-4000-8000-00000000000c', 'quoted', null)
+    for (const options of [
+      { from: 'https://evil.test' },
+      { from: null },
+      { as: stranger }
+    ])
+      expect(
+        (
+          await call('/attempts/00000000-0000-4000-8000-00000000000c/approve', {
+            method: 'POST',
+            body: {},
+            ...options
+          })
+        ).status
+      ).toBe(403)
+    const db = await mf.getD1Database('FILM_DB')
+    expect(
+      await db
+        .prepare(
+          "SELECT status FROM attempts WHERE id = '00000000-0000-4000-8000-00000000000c'"
+        )
+        .first('status')
+    ).toBe('quoted')
+  })
+
+  it('reports spend and shot state in the film overview', async () => {
+    await attempt('00000000-0000-4000-8000-00000000000d', 'accepted', 1.25)
+    const film = await read(
+      await call('/films/example-film'),
+      z.object({
+        spend: z.object({ total: z.number(), receipts: z.number() }),
+        episodes: z.array(
+          z.object({
+            shots: z.array(z.object({ id: z.string(), status: z.string() }))
+          })
+        )
+      })
+    )
+    expect(film.spend).toMatchObject({ total: 1.25, receipts: 1 })
+    expect(
+      film.episodes[0].shots.find((shot) => shot.id === 's01-pour')?.status
+    ).toBe('approved')
+  })
 })
 
 describe('film overview', () => {
