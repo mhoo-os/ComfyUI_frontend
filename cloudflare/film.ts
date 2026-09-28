@@ -1,5 +1,6 @@
 import { z } from 'zod'
 
+import { shotStates, spendSummary } from './attemptLedger'
 import { compileShot, compileTargets, isCompileTarget } from './compilers'
 import { boundedJson } from './http'
 import { renderBlockers, sceneSpecSchema } from './shotSpec'
@@ -94,13 +95,14 @@ function resolveCast(shot: ShotSpec, cast: Map<string, CastState>) {
 export async function loadScene(
   db: D1Database,
   id: string,
-  castByFilm = new Map<string, Promise<Map<string, CastState>>>()
+  castByFilm = new Map<string, Promise<Map<string, CastState>>>(),
+  version?: number
 ) {
   const row = await db
     .prepare(
-      'SELECT id, version, status, spec FROM scenes WHERE id = ? ORDER BY version DESC LIMIT 1'
+      'SELECT id, version, status, spec FROM scenes WHERE id = ?1 AND (?2 IS NULL OR version = ?2) ORDER BY version DESC LIMIT 1'
     )
-    .bind(id)
+    .bind(id, version ?? null)
     .first<SceneRow>()
   if (!row) return null
   const parsed = sceneSpecSchema.safeParse(JSON.parse(row.spec))
@@ -166,8 +168,7 @@ const badRequest = (error: string, issues?: string[]) =>
 const notFound = (what: string) =>
   Response.json({ error: `${what} not found.` }, { status: 404 })
 
-/** The film with every episode's breakdown state. Spend will come from render
- * receipts; none exist until the render slice, so it is reported as 0. */
+/** The film with every episode's breakdown state, per-shot render state and spend so far. */
 async function filmOverview(db: D1Database, id: string) {
   const film = await db
     .prepare('SELECT id, title, status FROM films WHERE id = ?')
@@ -192,11 +193,15 @@ async function filmOverview(db: D1Database, id: string) {
       .bind(id)
   ])
   const castCache = new Map<string, Promise<Map<string, CastState>>>()
+  const [spend, states] = await Promise.all([
+    spendSummary(db, id),
+    shotStates(db, id)
+  ])
   return Response.json({
     id: film.id,
     title: film.title,
     status: film.status,
-    spend: { total: 0, currency: 'USD', receipts: 0 },
+    spend,
     episodes: await Promise.all(
       episodes.map(async (episode) => {
         const inEpisode = scenes.filter(
@@ -243,7 +248,9 @@ async function filmOverview(db: D1Database, id: string) {
           version: scene.version,
           shots: scene.readiness.map(({ shot, blockers }) => ({
             id: shot,
-            status: blockers.length ? 'blocked' : 'ready',
+            status:
+              states.get(`${scene.id}/${shot}`) ??
+              (blockers.length ? 'blocked' : 'ready'),
             blockers
           }))
         }

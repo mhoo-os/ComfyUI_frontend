@@ -3,6 +3,7 @@ import { z } from 'zod'
 
 import { compileTalkingShot, talkingShotSchema } from './talkingShot'
 import { filmRoute } from './film'
+import { attemptRoute } from './filmRender'
 import { reviewRoute } from './reviewer'
 import { routeShot, expandShot } from './planner'
 import { models, nodeDefinitions } from './graph'
@@ -13,6 +14,7 @@ import { userData } from './userData'
 
 export { ComfyJobs } from './jobs'
 export { ComfyProduction } from './workflow'
+export { FilmRender } from './filmRender'
 export { ComfyRenderer } from './rendering'
 
 const base = '/00/comfy'
@@ -80,6 +82,8 @@ export default {
       if (path === '/review' && request.method === 'POST')
         return await reviewRoute(request, env, await boundedJson(request))
       if (path.startsWith('/film/')) {
+        const attempt = await attemptRoute(request, env, path)
+        if (attempt) return attempt
         const film = await filmRoute(request, env, path)
         if (film) return film
       }

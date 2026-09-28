@@ -29,7 +29,7 @@ describe('film scene loading', () => {
   it('returns the validated scene with per-shot blockers', async () => {
     const { db, queries } = database([row(example)])
     const scene = await loadScene(db, 'coffee-cart')
-    expect(queries).toEqual([['coffee-cart']])
+    expect(queries).toEqual([['coffee-cart', null]])
     expect(scene).toMatchObject({ version: 2, valid: true })
     expect(scene?.valid && scene.readiness).toEqual([
       {

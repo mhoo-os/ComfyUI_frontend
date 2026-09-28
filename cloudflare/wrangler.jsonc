@@ -91,6 +91,11 @@
       "binding": "COMFY_PRODUCTION",
       "name": "mhoo-comfy-production",
       "class_name": "ComfyProduction"
+    },
+    {
+      "binding": "FILM_RENDER",
+      "name": "mhoo-film-render",
+      "class_name": "FilmRender"
     }
   ]
 }
