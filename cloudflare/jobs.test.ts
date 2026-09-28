@@ -399,6 +399,76 @@ describe('Concurrent jobs', () => {
     })
   })
 
+  const finishingChain = (video: string) => ({
+    '1': {
+      class_type: 'MhooClip',
+      inputs: { video_url: video, start: 0, duration: 2 }
+    },
+    '2': {
+      class_type: 'MhooSequence',
+      inputs: { clip_1: ['1', 0], transition: 'cut' }
+    },
+    '3': { class_type: 'MhooCompose', inputs: { sequence: ['2', 0] } },
+    '4': { class_type: 'MhooExport', inputs: { edit: ['3', 0] } }
+  })
+  const uploadClip = async (mf: Miniflare) =>
+    z.object({ url: z.string() }).parse(
+      await (
+        await mf.dispatchFetch('https://test/production/upload', {
+          method: 'POST',
+          headers: { 'content-type': 'video/mp4', 'content-length': '10' },
+          body: 'test-video'
+        })
+      ).json()
+    ).url
+
+  it('keeps following a paid branch when a finishing branch fails', async () => {
+    const { state, handler } = provider()
+    const mf = await runtime(async (request) =>
+      new URL(request.url).hostname === 'renderer.example.com'
+        ? new Response('Renderer unavailable', { status: 500 })
+        : handler(request)
+    )
+    const job = await queue(mf, {
+      ...finishingChain(await uploadClip(mf)),
+      '5': { class_type: 'HiggsfieldSoul', inputs: { prompt: 'A lake' } }
+    })
+    for (let i = 0; i < 4; i++) await tick(mf)
+    expect(state.submissions).toBe(1)
+    expect((await statusOf(mf, job.prompt_id)).status).toBe('in_progress')
+    state.outcome.set(state.ids[0], 'completed')
+    await tick(mf)
+    expect(state.submissions).toBe(1)
+    expect(await jobs(mf)).toMatchObject({
+      jobs: [
+        {
+          status: 'failed',
+          outputs_count: 1,
+          execution_error: { node_id: '4' }
+        }
+      ]
+    })
+  })
+
+  it('honours a cancel that arrives while the final render runs', async () => {
+    let id = ''
+    const mf: Miniflare = await runtime(async (request) => {
+      expect(new URL(request.url).hostname).toBe('renderer.example.com')
+      await mf.dispatchFetch(`https://test/jobs/${id}/cancel`, {
+        method: 'POST'
+      })
+      return new Response('finished-mp4', {
+        headers: { 'content-type': 'video/mp4', 'content-length': '12' }
+      })
+    })
+    id = (await queue(mf, finishingChain(await uploadClip(mf)))).prompt_id
+    for (let i = 0; i < 4; i++) await tick(mf)
+    expect(await statusOf(mf, id)).toMatchObject({
+      status: 'cancelled',
+      outputs_count: 1
+    })
+  })
+
   it('keeps following a job saved by the single-slot ledger without resubmitting it', async () => {
     const { state, handler } = provider()
     const mf = await runtime(handler)

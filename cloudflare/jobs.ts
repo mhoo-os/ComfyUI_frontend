@@ -230,13 +230,18 @@ export class ComfyJobs extends DurableObject<Env> {
     const jobs = await this.ctx.storage.get<Job>(ids.map((id) => `job:${id}`))
     return [...jobs.values()]
   }
-  /** Sets the alarm for the earliest due job, or clears it. */
+  /** Sets the alarm for the earliest due job, or clears it. Call it inside
+   * `blockConcurrencyWhile`, or through `rearm`, so a stale read can never
+   * clear the alarm of a job added meanwhile. */
   private async arm() {
     const due = (await this.activeJobs()).flatMap((job) =>
       job.due === undefined ? [] : [job.due]
     )
     if (due.length) await this.ctx.storage.setAlarm(Math.min(...due))
     else await this.ctx.storage.deleteAlarm()
+  }
+  private rearm() {
+    return this.ctx.blockConcurrencyWhile(() => this.arm())
   }
   private async status() {
     return { exec_info: { queue_remaining: (await this.active()).length } }
@@ -259,10 +264,10 @@ export class ComfyJobs extends DurableObject<Env> {
       job.updated = Date.now()
       await this.ctx.storage.put(`job:${job.id}`, job)
       await this.setActive(ids.filter((id) => id !== job.id))
+      await this.arm()
       return true
     })
     if (!finished) return
-    await this.arm()
     if (status === 'completed')
       this.broadcast('execution_success', {
         prompt_id: job.id,
@@ -470,21 +475,15 @@ export class ComfyJobs extends DurableObject<Env> {
           ? path.split('/')[2]
           : body.prompt_id
         const requested = await this.ctx.blockConcurrencyWhile(async () => {
-          const jobs = (await this.activeJobs()).filter(
-            (job) =>
-              (!target || target === job.id) &&
-              (!body.job_ids || body.job_ids.includes(job.id))
+          const jobs = (await this.activeJobs()).filter((job) =>
+            cancelTarget(job, target, body.job_ids)
           )
-          for (const job of jobs) {
-            job.cancelRequested = true
-            if (job.runner !== 'workflow')
-              job.due = Math.min(job.due ?? Infinity, Date.now() + 1000)
-            await this.ctx.storage.put(`job:${job.id}`, job)
-          }
+          for (const job of jobs)
+            await this.ctx.storage.put(`job:${job.id}`, requestCancel(job))
+          if (jobs.length) await this.arm()
           return jobs.length
         })
         if (!requested) return json({})
-        await this.arm()
         return json({ cancel_requested: true })
       }
       if (path === '/queue')
@@ -519,7 +518,7 @@ export class ComfyJobs extends DurableObject<Env> {
     }
     job.due = Date.now() + delay
     await this.save(job)
-    await this.arm()
+    await this.rearm()
   }
 
   async workflowPlans(id: string) {
@@ -610,7 +609,7 @@ export class ComfyJobs extends DurableObject<Env> {
       (job) => (job.due ?? (job.done ? Infinity : 0)) <= now
     )
     await Promise.allSettled(due.map((job) => this.wake(job)))
-    await this.arm()
+    await this.rearm()
   }
 
   private async wake(job: Job) {
@@ -675,28 +674,35 @@ export class ComfyJobs extends DurableObject<Env> {
     if (job.cancelRequested) return this.cancel(job)
     const ready = job.halted ? [] : readyNodes(job)
     const finishing = ready.find((id) => isFinishing(job.graph[id].class_type))
-    try {
-      if (finishing) await this.runFinishing(job, finishing)
-      else await this.submitReady(job, ready)
-    } catch (error) {
-      return this.finish(
-        job,
-        'failed',
-        error instanceof Error
-          ? error.message
-          : 'Higgsfield request failed. Check provider history before rerunning.'
-      )
-    }
+    await this.submitReady(
+      job,
+      ready.filter((id) => !isFinishing(job.graph[id].class_type))
+    )
+    if (finishing && !stopping(job)) await this.finishingStep(job, finishing)
     if (!(await this.pollRunning(job))) return
     await this.settle(job, finishing || readyNodes(job).length ? 100 : 5000)
   }
 
+  /** Runs one finishing node. A failure stops new work but leaves running
+   * paid nodes to be followed to the end. */
+  private async finishingStep(job: Active, nodeId: string) {
+    try {
+      await this.runFinishing(job, nodeId)
+    } catch (error) {
+      job.halted ??= {
+        status: 'failed',
+        error: error instanceof Error ? error.message : 'Finishing failed.',
+        node: nodeId
+      }
+      await this.save(job)
+    }
+  }
+
   /** Finishes the job once nothing is left to follow, else schedules the next tick. */
   private async settle(job: Active, delay: number) {
-    if (job.done.length >= job.order.length)
-      return this.finish(job, 'completed')
-    if (job.halted && !Object.keys(job.running).length)
-      return this.finish(job, job.halted.status, job.halted.error)
+    if (job.cancelRequested) return this.cancel(job)
+    const outcome = settledOutcome(job)
+    if (outcome) return this.finish(job, outcome.status, outcome.error)
     await this.schedule(job, delay)
   }
 
@@ -754,14 +760,18 @@ export class ComfyJobs extends DurableObject<Env> {
     if (node.class_type === 'MhooExport') {
       job.rendering = true
       await this.save(job)
-      job.outputs[nodeId] = [
-        await renderVideo(
-          this.env,
-          renderPlanSchema.parse(value),
-          `outputs/${job.id}/${nodeId}/0`
-        )
-      ]
-      job.rendering = false
+      try {
+        job.outputs[nodeId] = [
+          await renderVideo(
+            this.env,
+            renderPlanSchema.parse(value),
+            `outputs/${job.id}/${nodeId}/0`
+          )
+        ]
+      } finally {
+        // Only a run cut off mid-render leaves this set.
+        job.rendering = false
+      }
     } else {
       job.edits = { ...job.edits, [nodeId]: value }
     }
@@ -774,7 +784,7 @@ export class ComfyJobs extends DurableObject<Env> {
   private async submitReady(job: Active, ready: string[]) {
     const room = maxNodesInFlight - Object.keys(job.running).length
     for (const nodeId of ready.slice(0, Math.max(0, room))) {
-      if (job.halted || job.cancelRequested) return
+      if (stopping(job)) return
       await this.submitNode(job, nodeId)
     }
   }
@@ -792,8 +802,15 @@ export class ComfyJobs extends DurableObject<Env> {
       node.class_type === 'HiggsfieldTalkingShot' &&
       node.inputs.planner === 'jev_astra' &&
       !job.plannedScenes?.[nodeId]
-    )
-      throw new Error('The creative plan is missing; no video was submitted.')
+    ) {
+      job.halted ??= {
+        status: 'failed',
+        error: 'The creative plan is missing; no video was submitted.',
+        node: nodeId
+      }
+      await this.save(job)
+      return
+    }
     this.started(job)
     job.status = 'in_progress'
     job.running[nodeId] = { submitting: true }
@@ -897,6 +914,33 @@ export class ComfyJobs extends DurableObject<Env> {
     await this.save(job)
   }
 }
+
+/** Whether a cancel request (by job id, a list of ids, or none for all) covers the job. */
+const cancelTarget = (
+  job: Job,
+  target: string | undefined,
+  ids: string[] | undefined
+) => (!target || target === job.id) && (!ids || ids.includes(job.id))
+
+/** Marks a job cancelled; a ledger-driven job is woken within a second. */
+function requestCancel(job: Job) {
+  job.cancelRequested = true
+  if (job.runner !== 'workflow')
+    job.due = Math.min(job.due ?? Infinity, Date.now() + 1000)
+  return job
+}
+
+/** How the job ends once nothing is left to follow, or null to keep going. */
+function settledOutcome(
+  job: Active
+): { status: Job['status']; error?: string } | null {
+  if (job.done.length >= job.order.length) return { status: 'completed' }
+  if (job.halted && !Object.keys(job.running).length) return job.halted
+  return null
+}
+
+/** Every save picks up a cancel request from storage, so read this fresh. */
+const stopping = (job: Job) => Boolean(job.halted ?? job.cancelRequested)
 
 function stopReason(job: Job) {
   if (job.rendering)
