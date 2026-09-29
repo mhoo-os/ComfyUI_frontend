@@ -26,6 +26,20 @@ const submissionSchema = z.object({
     .object({ extra_pnginfo: z.object({ workflow: z.unknown() }).optional() })
     .optional()
 })
+/** How many jobs may run at once. A further submission is refused with queue_full. */
+const maxActiveJobs = 4
+/** How many paid nodes of one job may be at the provider at once. */
+const maxNodesInFlight = 4
+
+/** One paid node at the provider. `submitting` is set before the request is
+ * sent, so finding it set later means the outcome is unknown. */
+type NodeRun = {
+  requestId?: string
+  submitting?: boolean
+  status?: string
+  /** Consecutive failed status reads. */
+  errors?: number
+}
 type Job = {
   id: string
   graph: Graph
@@ -35,7 +49,15 @@ type Job = {
   status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'cancelled'
   created: number
   updated: number
+  /** Completed node count, kept alongside `done` for older readers. */
   index: number
+  done?: string[]
+  running?: Record<string, NodeRun>
+  /** When the alarm should next advance this job. */
+  due?: number
+  /** Set when a node failed: nothing new is submitted, running nodes are
+   * followed to the end, then the job finishes with this error. */
+  halted?: { status: 'failed' | 'cancelled'; error: string; node: string }
   outputs: Record<string, Media[]>
   edits?: Record<string, EditValue>
   rendering?: boolean
@@ -43,14 +65,65 @@ type Job = {
   workflowDelay?: number
   workflowStarts?: number
   plannedScenes?: Record<string, string>
+  /** Single-node state written before concurrent jobs; read by `upgrade`. */
   requestId?: string
-  providerRequests?: Record<string, string>
   submitting?: boolean
+  providerRequests?: Record<string, string>
   cancelRequested?: boolean
   error?: string
   pollErrors?: number
   lastPollError?: string
   providerStatus?: string
+}
+type Active = Job & { done: string[]; running: Record<string, NodeRun> }
+
+/** The node a single-node ledger job had at the provider, if any. */
+function legacyRun(job: Job): Record<string, NodeRun> {
+  const node = job.order.at(job.index)
+  if (!node || !(job.requestId || job.submitting)) return {}
+  return {
+    [node]: {
+      requestId: job.requestId,
+      submitting: job.submitting,
+      status: job.providerStatus
+    }
+  }
+}
+
+/** Moves a job saved by the single-node ledger onto per-node state. */
+function upgrade(job: Job): Active {
+  if (job.done && job.running)
+    return { ...job, done: job.done, running: job.running }
+  return {
+    ...job,
+    done: job.order.slice(0, job.index),
+    running: legacyRun(job),
+    requestId: undefined,
+    submitting: undefined
+  }
+}
+
+const links = (job: Job, id: string) =>
+  Object.values(job.graph[id].inputs).flatMap((value) =>
+    Array.isArray(value) ? [value[0]] : []
+  )
+
+/** Nodes whose inputs are all done and which have not started. */
+function readyNodes(job: Active) {
+  return job.order.filter(
+    (id) =>
+      !job.done.includes(id) &&
+      !Object.hasOwn(job.running, id) &&
+      links(job, id).every((link) => job.done.includes(link))
+  )
+}
+
+/** The node an error or progress report refers to. */
+function currentNode(job: Job) {
+  if (job.halted) return job.halted.node
+  const { done, running } = upgrade(job)
+  const pending = job.order.filter((id) => !done.includes(id))
+  return [...Object.keys(running), ...pending].at(0) ?? ''
 }
 function outputFor(job: Job, node: string) {
   const media = job.outputs[node] ?? []
@@ -89,10 +162,12 @@ function jobDetail(job: Job) {
     (total, media) => total + media.length,
     0
   )
+  const running = Object.values(job.running ?? {})
   return {
     id: job.id,
     runner: job.runner ?? 'durable-object',
-    provider_request_id: job.requestId,
+    provider_request_id:
+      running.find((run) => run.requestId)?.requestId ?? job.requestId,
     provider_requests: job.providerRequests ?? {},
     last_poll_error: job.lastPollError,
     provider_status: job.providerStatus,
@@ -122,7 +197,7 @@ function jobDetail(job: Job) {
     outputs,
     ...(job.error && {
       execution_error: {
-        node_id: job.order[job.index] ?? '',
+        node_id: currentNode(job),
         node_type: 'Higgsfield',
         exception_message: job.error,
         exception_type: 'HiggsfieldError',
@@ -134,6 +209,8 @@ function jobDetail(job: Job) {
   }
 }
 
+// The job tests drive this class through Miniflare (jobs.test.ts), which
+// static analysis can't follow, so its complexity is judged as untested.
 export class ComfyJobs extends DurableObject<Env> {
   private broadcast(type: string, data: unknown) {
     for (const socket of this.ctx.getWebSockets()) {
@@ -144,9 +221,36 @@ export class ComfyJobs extends DurableObject<Env> {
       }
     }
   }
+  /** Active job ids. Older ledgers stored a single id. */
+  private async active() {
+    const value = await this.ctx.storage.get<string | string[]>('active')
+    if (typeof value === 'string') return [value]
+    return Array.isArray(value) ? value : []
+  }
+  private async setActive(ids: string[]) {
+    if (ids.length) await this.ctx.storage.put('active', ids)
+    else await this.ctx.storage.delete('active')
+  }
+  private async activeJobs() {
+    const ids = await this.active()
+    const jobs = await this.ctx.storage.get<Job>(ids.map((id) => `job:${id}`))
+    return [...jobs.values()]
+  }
+  /** Sets the alarm for the earliest due job, or clears it. Call it inside
+   * `blockConcurrencyWhile`, or through `rearm`, so a stale read can never
+   * clear the alarm of a job added meanwhile. */
+  private async arm() {
+    const due = (await this.activeJobs()).flatMap((job) =>
+      job.due === undefined ? [] : [job.due]
+    )
+    if (due.length) await this.ctx.storage.setAlarm(Math.min(...due))
+    else await this.ctx.storage.deleteAlarm()
+  }
+  private rearm() {
+    return this.ctx.blockConcurrencyWhile(() => this.arm())
+  }
   private async status() {
-    const active = await this.ctx.storage.get<string>('active')
-    return { exec_info: { queue_remaining: active ? 1 : 0 } }
+    return { exec_info: { queue_remaining: (await this.active()).length } }
   }
   private async save(job: Job) {
     await this.ctx.blockConcurrencyWhile(async () => {
@@ -158,18 +262,19 @@ export class ComfyJobs extends DurableObject<Env> {
   }
   private async finish(job: Job, status: Job['status'], error?: string) {
     const finished = await this.ctx.blockConcurrencyWhile(async () => {
-      if ((await this.ctx.storage.get<string>('active')) !== job.id)
-        return false
-      job.status = status
-      job.error = error
+      const ids = await this.active()
+      if (!ids.includes(job.id)) return false
+      const stored = await this.ctx.storage.get<Job>(`job:${job.id}`)
+      Object.assign(job, finalState(stored, status, error))
+      job.due = undefined
       job.updated = Date.now()
       await this.ctx.storage.put(`job:${job.id}`, job)
-      await this.ctx.storage.delete('active')
-      await this.ctx.storage.deleteAlarm()
+      await this.setActive(ids.filter((id) => id !== job.id))
+      await this.arm()
       return true
     })
     if (!finished) return
-    if (status === 'completed')
+    if (job.status === 'completed')
       this.broadcast('execution_success', {
         prompt_id: job.id,
         timestamp: Date.now()
@@ -177,9 +282,9 @@ export class ComfyJobs extends DurableObject<Env> {
     else
       this.broadcast('execution_error', {
         prompt_id: job.id,
-        node_id: job.order[job.index],
+        node_id: currentNode(job),
         node_type: 'Higgsfield',
-        exception_message: error ?? 'Generation cancelled.',
+        exception_message: job.error ?? 'Generation cancelled.',
         exception_type: 'HiggsfieldError',
         traceback: [],
         executed: Object.keys(job.outputs),
@@ -231,13 +336,13 @@ export class ComfyJobs extends DurableObject<Env> {
           }
         }
         return await this.ctx.blockConcurrencyWhile(async () => {
-          if (await this.ctx.storage.get('active'))
+          const ids = await this.active()
+          if (ids.length >= maxActiveJobs)
             return json(
               {
                 error: {
                   type: 'queue_full',
-                  message:
-                    'A workflow is already running. Wait for it to finish.',
+                  message: `${maxActiveJobs} workflows are already running. Wait for one to finish.`,
                   details: ''
                 }
               },
@@ -254,14 +359,17 @@ export class ComfyJobs extends DurableObject<Env> {
             created: Date.now(),
             updated: Date.now(),
             index: 0,
+            done: [],
+            running: {},
+            due: Date.now() + 1000,
             outputs: {},
             ...(order.some(
               (node) => graph[node].class_type === 'HiggsfieldTalkingShot'
             ) && { runner: 'workflow' as const })
           }
           await this.save(job)
-          await this.ctx.storage.put('active', id)
-          await this.ctx.storage.setAlarm(Date.now() + 1000)
+          await this.setActive([...ids, id])
+          await this.arm()
           this.broadcast('status', { status: await this.status() })
           return json({ prompt_id: id, number: job.created, node_errors: {} })
         })
@@ -369,26 +477,20 @@ export class ComfyJobs extends DurableObject<Env> {
               })
               .parse(await boundedJson(request))
           : {}
-        return this.ctx.blockConcurrencyWhile(async () => {
-          const id = await this.ctx.storage.get<string>('active')
-          const job = id
-            ? await this.ctx.storage.get<Job>(`job:${id}`)
-            : undefined
-          if (!job) return json({})
-          const target = /^\/jobs\/[^/]+\/cancel$/.test(path)
-            ? path.split('/')[2]
-            : body.prompt_id
-          if (
-            (target && target !== id) ||
-            (body.job_ids && !body.job_ids.includes(job.id))
+        const target = /^\/jobs\/[^/]+\/cancel$/.test(path)
+          ? path.split('/')[2]
+          : body.prompt_id
+        const requested = await this.ctx.blockConcurrencyWhile(async () => {
+          const jobs = (await this.activeJobs()).filter((job) =>
+            cancelTarget(job, target, body.job_ids)
           )
-            return json({})
-          job.cancelRequested = true
-          await this.ctx.storage.put(`job:${job.id}`, job)
-          if (job.runner !== 'workflow' && !(await this.ctx.storage.getAlarm()))
-            await this.ctx.storage.setAlarm(Date.now() + 1000)
-          return json({ cancel_requested: true })
+          for (const job of jobs)
+            await this.ctx.storage.put(`job:${job.id}`, requestCancel(job))
+          if (jobs.length) await this.arm()
+          return jobs.length
         })
+        if (!requested) return json({})
+        return json({ cancel_requested: true })
       }
       if (path === '/queue')
         return json({ queue_running: [], queue_pending: [] })
@@ -409,16 +511,20 @@ export class ComfyJobs extends DurableObject<Env> {
   webSocketClose(socket: WebSocket) {
     socket.close()
   }
-  private workflowInFlight?: {
-    id: string
-    promise: Promise<{ done: boolean; status: string; delay: number }>
-  }
+  private workflowInFlight = new Map<
+    string,
+    Promise<{ done: boolean; status: string; delay: number }>
+  >()
 
   private async schedule(job: Job, delay: number) {
     if (job.runner === 'workflow') {
       job.workflowDelay = delay
       await this.save(job)
-    } else await this.ctx.storage.setAlarm(Date.now() + delay)
+      return
+    }
+    job.due = Date.now() + delay
+    await this.save(job)
+    await this.rearm()
   }
 
   async workflowPlans(id: string) {
@@ -468,18 +574,15 @@ export class ComfyJobs extends DurableObject<Env> {
   }
 
   async workflowTick(id: string) {
-    if (this.workflowInFlight) {
-      if (this.workflowInFlight.id !== id)
-        throw new Error('Another workflow step is completing.')
-      return this.workflowInFlight.promise
-    }
+    const inFlight = this.workflowInFlight.get(id)
+    if (inFlight) return inFlight
     const run = async () => {
       const job = await this.ctx.storage.get<Job>(`job:${id}`)
       if (!job || job.runner !== 'workflow')
         throw new Error('Workflow job not found.')
       if (
         ['pending', 'in_progress'].includes(job.status) &&
-        (await this.ctx.storage.get<string>('active')) === id
+        (await this.active()).includes(id)
       )
         await this.advance(job)
       const current = await this.ctx.storage.get<Job>(`job:${id}`)
@@ -489,19 +592,53 @@ export class ComfyJobs extends DurableObject<Env> {
         delay: current?.workflowDelay ?? 5000
       }
     }
-    this.workflowInFlight = { id, promise: run() }
+    const promise = run()
+    this.workflowInFlight.set(id, promise)
     try {
-      return await this.workflowInFlight.promise
+      return await promise
     } finally {
-      this.workflowInFlight = undefined
+      this.workflowInFlight.delete(id)
     }
   }
 
+  // Called by the Durable Objects runtime when the alarm fires, not from our code.
+  // fallow-ignore-next-line unused-class-member
   async alarm() {
-    const id = await this.ctx.storage.get<string>('active')
-    const job = id ? await this.ctx.storage.get<Job>(`job:${id}`) : undefined
-    if (!job) return
-    if (job.runner !== 'workflow') return this.advance(job)
+    await this.runDue(Date.now())
+  }
+
+  /** Advances every active job due by `now`. One job's failure never stops
+   * the others; each keeps a fallback wake-up in case its run dies. */
+  protected async runDue(now: number) {
+    // A job saved by the single-slot ledger has no due time: wake it now.
+    const due = (await this.activeJobs()).filter(
+      (job) => (job.due ?? (job.done ? Infinity : 0)) <= now
+    )
+    await Promise.allSettled(due.map((job) => this.wake(job)))
+    await this.rearm()
+  }
+
+  /** Jobs this instance is advancing now; a second wake-up leaves them be. */
+  private waking = new Set<string>()
+
+  private async wake(job: Job) {
+    if (this.waking.has(job.id)) return
+    this.waking.add(job.id)
+    try {
+      job.due = Date.now() + 60_000
+      await this.save(job)
+      if (job.runner === 'workflow') await this.startWorkflow(job)
+      else await this.advance(job)
+    } finally {
+      this.waking.delete(job.id)
+    }
+  }
+
+  /** Starts (or checks) the durable workflow that drives a talking-shot job. */
+  // fallow-ignore-next-line complexity
+  private async startWorkflow(job: Job) {
+    job.due = undefined
+    await this.save(job)
     try {
       try {
         const instance = await this.env.COMFY_PRODUCTION.get(job.id)
@@ -524,7 +661,8 @@ export class ComfyJobs extends DurableObject<Env> {
         !current ||
         current.status !== 'pending' ||
         current.submitting ||
-        current.requestId
+        current.requestId ||
+        Object.keys(current.running ?? {}).length
       )
         return
       job.workflowStarts = (current.workflowStarts ?? 0) + 1
@@ -534,215 +672,356 @@ export class ComfyJobs extends DurableObject<Env> {
           'Could not start the durable workflow. Check workflow and provider history before rerunning.'
         )
       else {
+        job.due = Date.now() + 5000
         await this.save(job)
-        await this.ctx.storage.setAlarm(Date.now() + 5000)
       }
     }
   }
 
-  private async advance(job: Job) {
-    if (job.rendering) {
-      await this.finish(
-        job,
-        'failed',
-        'Render was interrupted. Completed generation outputs remain in history; rerun a finishing-only workflow to avoid generating again.'
-      )
-      return
-    }
-    if (job.submitting) {
-      await this.finish(
-        job,
-        'failed',
-        'Submission outcome is unknown. Check Higgsfield request history before rerunning; no automatic retry was made.'
-      )
-      return
-    }
-    if (Date.now() - job.created > 60 * 60 * 1000) {
-      await this.finish(
-        job,
-        'failed',
-        'Polling stopped after one hour. The provider may still be running; check Higgsfield before rerunning.'
-      )
-      return
-    }
-    if (job.cancelRequested) {
-      if (job.requestId) {
-        try {
-          await provider(this.env, `requests/${job.requestId}/cancel`, {})
-        } catch {
-          job.cancelRequested = false
-          await this.ctx.storage.put(`job:${job.id}`, job)
-          this.broadcast('notification', {
-            value:
-              'Higgsfield could not cancel this request. It may already be processing; tracking continues.'
-          })
-          await this.schedule(job, 5000)
-          return
-        }
+  // fallow-ignore-next-line complexity
+  private async advance(stored: Job) {
+    const job = upgrade(stored)
+    const stop = stopReason(job)
+    if (stop) return this.finish(job, 'failed', stop)
+    haltUnknownSubmissions(job)
+    if (job.halted && !Object.keys(job.running).length)
+      return this.finish(job, job.halted.status, job.halted.error)
+    if (job.cancelRequested) return this.cancel(job)
+    const ready = job.halted ? [] : readyNodes(job)
+    const finishing = ready.find((id) => isFinishing(job.graph[id].class_type))
+    await this.submitReady(
+      job,
+      ready.filter((id) => !isFinishing(job.graph[id].class_type))
+    )
+    if (finishing && !stopping(job)) await this.finishingStep(job, finishing)
+    if (!(await this.pollRunning(job))) return
+    await this.settle(job, finishing || readyNodes(job).length ? 100 : 5000)
+  }
+
+  /** Runs one finishing node. A failure stops new work but leaves running
+   * paid nodes to be followed to the end. */
+  private async finishingStep(job: Active, nodeId: string) {
+    try {
+      await this.runFinishing(job, nodeId)
+    } catch (error) {
+      job.halted ??= {
+        status: 'failed',
+        error: error instanceof Error ? error.message : 'Finishing failed.',
+        node: nodeId
       }
-      await this.finish(
-        job,
-        'cancelled',
-        'Workflow cancelled. Completed nodes remain in history.'
-      )
-      return
+      await this.save(job)
     }
-    const nodeId = job.order[job.index]
-    const originalNode = job.graph[nodeId]
+  }
+
+  /** Finishes the job once nothing is left to follow, else schedules the next tick. */
+  private async settle(job: Active, delay: number) {
+    if (job.cancelRequested) return this.cancel(job)
+    const outcome = settledOutcome(job)
+    if (outcome) return this.finish(job, outcome.status, outcome.error)
+    await this.schedule(job, delay)
+  }
+
+  private async cancel(job: Active) {
+    for (const run of Object.values(job.running)) {
+      if (run.requestId && !(await this.cancelRequest(run.requestId)))
+        return this.keepCancelling(job)
+    }
+    await this.finish(
+      job,
+      'cancelled',
+      'Workflow cancelled. Completed nodes remain in history.'
+    )
+  }
+
+  private async cancelRequest(requestId: string) {
+    try {
+      await provider(this.env, `requests/${requestId}/cancel`, {})
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** Higgsfield refused to cancel a running request. Stop asking but keep
+   * the cancellation: nothing new is submitted, and requests still running
+   * are followed to the end. */
+  private async keepCancelling(job: Active) {
+    job.cancelRequested = false
+    job.halted ??= {
+      status: 'cancelled',
+      error:
+        'Workflow cancelled. Higgsfield could not cancel every running request; those were followed to the end.',
+      node: currentNode(job)
+    }
+    await this.ctx.storage.put(`job:${job.id}`, job)
+    this.broadcast('notification', {
+      value:
+        'Higgsfield could not cancel this request. It may already be processing; tracking continues.'
+    })
+    await this.schedule(job, 5000)
+  }
+
+  private started(job: Active) {
+    if (job.done.length || Object.keys(job.running).length) return
+    this.broadcast('execution_start', {
+      prompt_id: job.id,
+      timestamp: Date.now()
+    })
+  }
+
+  private complete(job: Active, nodeId: string) {
+    delete job.running[nodeId]
+    job.done = [...job.done, nodeId]
+    job.index = job.done.length
+    this.broadcast('executed', {
+      node: nodeId,
+      display_node: nodeId,
+      prompt_id: job.id,
+      output: outputFor(job, nodeId)
+    })
+  }
+
+  private async runFinishing(job: Active, nodeId: string) {
+    const node = job.graph[nodeId]
+    this.started(job)
+    job.status = 'in_progress'
+    job.providerStatus =
+      node.class_type === 'MhooExport' ? 'rendering' : 'preparing edit'
+    this.broadcast('executing', { node: nodeId, prompt_id: job.id })
+    const value = resolveFinishing(node, job.edits ?? {}, job.outputs)
+    if (node.class_type === 'MhooExport') {
+      job.rendering = true
+      await this.save(job)
+      try {
+        job.outputs[nodeId] = [
+          await renderVideo(
+            this.env,
+            renderPlanSchema.parse(value),
+            `outputs/${job.id}/${nodeId}/0`
+          )
+        ]
+      } finally {
+        // Only a run cut off mid-render leaves this set.
+        job.rendering = false
+      }
+    } else {
+      job.edits = { ...job.edits, [nodeId]: value }
+    }
+    this.complete(job, nodeId)
+    job.providerStatus = undefined
+    await this.save(job)
+  }
+
+  /** Submits ready paid nodes, each exactly once, up to the in-flight limit. */
+  private async submitReady(job: Active, ready: string[]) {
+    const room = maxNodesInFlight - Object.keys(job.running).length
+    for (const nodeId of ready.slice(0, Math.max(0, room))) {
+      if (stopping(job)) return
+      await this.submitNode(job, nodeId)
+    }
+  }
+
+  // fallow-ignore-next-line complexity
+  private async submitNode(job: Active, nodeId: string) {
+    const original = job.graph[nodeId]
     const node = job.plannedScenes?.[nodeId]
       ? {
-          ...originalNode,
-          inputs: { ...originalNode.inputs, scene: job.plannedScenes[nodeId] }
+          ...original,
+          inputs: { ...original.inputs, scene: job.plannedScenes[nodeId] }
         }
-      : originalNode
+      : original
+    if (
+      node.class_type === 'HiggsfieldTalkingShot' &&
+      node.inputs.planner === 'jev_astra' &&
+      !job.plannedScenes?.[nodeId]
+    ) {
+      job.halted ??= {
+        status: 'failed',
+        error: 'The creative plan is missing; no video was submitted.',
+        node: nodeId
+      }
+      await this.save(job)
+      return
+    }
+    this.started(job)
+    job.status = 'in_progress'
+    job.running[nodeId] = { submitting: true }
+    await this.save(job)
+    this.broadcast('executing', { node: nodeId, prompt_id: job.id })
+    const maxLength = Object.hasOwn(
+      models[node.class_type].schema.properties,
+      'prompt'
+    )
+      ? (models[node.class_type].schema.properties.prompt.maxLength ?? 8000)
+      : 8000
     try {
-      if (
-        node.class_type === 'HiggsfieldTalkingShot' &&
-        node.inputs.planner === 'jev_astra' &&
-        !job.plannedScenes?.[nodeId]
+      const result = await new ReferenceLibrary(
+        this.ctx.storage,
+        this.env
+      ).submit(resolveInputs(node, job.outputs), maxLength, async (input) =>
+        resultSchema.parse(
+          await provider(this.env, models[node.class_type].endpoint, input)
+        )
       )
-        throw new Error('The creative plan is missing; no video was submitted.')
-      if (isFinishing(node.class_type)) {
-        if (job.index === 0)
-          this.broadcast('execution_start', {
-            prompt_id: job.id,
-            timestamp: Date.now()
-          })
-        job.status = 'in_progress'
-        job.providerStatus =
-          node.class_type === 'MhooExport' ? 'rendering' : 'preparing edit'
-        this.broadcast('executing', { node: nodeId, prompt_id: job.id })
-        const value = resolveFinishing(node, job.edits ?? {}, job.outputs)
-        if (node.class_type === 'MhooExport') {
-          job.rendering = true
-          await this.save(job)
-          job.outputs[nodeId] = [
-            await renderVideo(
-              this.env,
-              renderPlanSchema.parse(value),
-              `outputs/${job.id}/${nodeId}/0`
-            )
-          ]
-          job.rendering = false
-        } else {
-          job.edits = { ...job.edits, [nodeId]: value }
-        }
-        this.broadcast('executed', {
-          node: nodeId,
-          display_node: nodeId,
-          prompt_id: job.id,
-          output: outputFor(job, nodeId)
-        })
-        job.index++
-        job.providerStatus = undefined
-        await this.save(job)
-        const current = await this.ctx.storage.get<Job>(`job:${job.id}`)
-        if (current?.cancelRequested)
-          await this.finish(
-            job,
-            'cancelled',
-            'Workflow cancelled. Completed outputs remain in history.'
-          )
-        else if (job.index >= job.order.length)
-          await this.finish(job, 'completed')
-        else await this.schedule(job, 100)
-        return
+      job.running[nodeId] = { requestId: result.request_id }
+      job.providerRequests = {
+        ...job.providerRequests,
+        [nodeId]: result.request_id
       }
-      if (!job.requestId) {
-        if (job.index === 0)
-          this.broadcast('execution_start', {
-            prompt_id: job.id,
-            timestamp: Date.now()
-          })
-        job.status = 'in_progress'
-        job.submitting = true
-        await this.save(job)
-        this.broadcast('executing', { node: nodeId, prompt_id: job.id })
-        const result = await new ReferenceLibrary(
-          this.ctx.storage,
-          this.env
-        ).submit(
-          resolveInputs(node, job.outputs),
-          Object.hasOwn(models[node.class_type].schema.properties, 'prompt')
-            ? (models[node.class_type].schema.properties.prompt.maxLength ??
-                8000)
-            : 8000,
-          async (input) =>
-            resultSchema.parse(
-              await provider(this.env, models[node.class_type].endpoint, input)
-            )
-        )
-        job.requestId = result.request_id
-        job.providerRequests = {
-          ...job.providerRequests,
-          [nodeId]: result.request_id
-        }
-        job.submitting = false
-        await this.save(job)
-      }
-      const result = resultSchema.parse(
-        await provider(this.env, `requests/${job.requestId}/status`)
-      )
-      job.providerStatus = result.status
-      await this.save(job)
-      if (['failed', 'nsfw', 'canceled'].includes(result.status)) {
-        await this.finish(
-          job,
-          result.status === 'canceled' ? 'cancelled' : 'failed',
-          providerFailure(result)
-        )
-        return
-      }
-      if (result.status === 'completed') {
-        const media = resultMedia(result)
-        if (!media.length)
-          throw new Error(
-            'Higgsfield completed without supported media outputs.'
-          )
-        job.outputs[nodeId] = media
-        await this.save(job)
-        job.outputs[nodeId] = await Promise.all(
-          media.map((item, index) =>
-            archiveMedia(this.env, item, `outputs/${job.id}/${nodeId}/${index}`)
-          )
-        )
-        job.requestId = undefined
-        job.providerStatus = undefined
-        job.pollErrors = 0
-        job.lastPollError = undefined
-        this.broadcast('executed', {
-          node: nodeId,
-          display_node: nodeId,
-          prompt_id: job.id,
-          output: outputFor(job, nodeId)
-        })
-        job.index++
-        await this.save(job)
-        if (job.index >= job.order.length) {
-          await this.finish(job, 'completed')
-          return
-        }
-      }
-      job.pollErrors = 0
-      job.lastPollError = undefined
-      await this.save(job)
-      await this.schedule(job, 5000)
     } catch (error) {
-      job.pollErrors = (job.pollErrors ?? 0) + 1
-      job.lastPollError =
-        error instanceof Error ? error.message : 'Provider status unavailable'
-      if (job.requestId && job.pollErrors < 12) {
-        await this.save(job)
-        await this.schedule(job, 15000)
-        return
+      // The request may have reached the provider: never resubmit it.
+      delete job.running[nodeId]
+      job.halted = {
+        status: 'failed',
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Higgsfield request failed. Check provider history before rerunning.',
+        node: nodeId
       }
-      await this.finish(
-        job,
-        'failed',
-        error instanceof Error
-          ? error.message
-          : 'Higgsfield request failed. Check provider history before rerunning.'
+    }
+    await this.save(job)
+  }
+
+  /** Polls every submitted node. Returns false when the job already ended or
+   * a status read failed (the next tick is then already scheduled). */
+  /** Polls every submitted node. Returns false when a status read failed
+   * and nodes are still running (the next tick is then already scheduled). */
+  // fallow-ignore-next-line complexity
+  private async pollRunning(job: Active) {
+    let failed = false
+    for (const [nodeId, run] of Object.entries(job.running)) {
+      if (!run.requestId) continue
+      try {
+        await this.pollNode(job, nodeId, run.requestId)
+      } catch (error) {
+        failed = true
+        pollFailed(job, nodeId, error)
+      }
+    }
+    job.pollErrors = failed ? (job.pollErrors ?? 0) + 1 : 0
+    if (!failed) job.lastPollError = undefined
+    if (!failed || !Object.keys(job.running).length) return true
+    await this.schedule(job, 15000)
+    return false
+  }
+
+  // fallow-ignore-next-line complexity
+  private async pollNode(job: Active, nodeId: string, requestId: string) {
+    const result = resultSchema.parse(
+      await provider(this.env, `requests/${requestId}/status`)
+    )
+    job.running[nodeId] = { ...job.running[nodeId], status: result.status }
+    job.providerStatus = result.status
+    await this.save(job)
+    if (['failed', 'nsfw', 'canceled'].includes(result.status)) {
+      delete job.running[nodeId]
+      job.halted ??= {
+        status: result.status === 'canceled' ? 'cancelled' : 'failed',
+        error: providerFailure(result),
+        node: nodeId
+      }
+      await this.save(job)
+      return
+    }
+    if (result.status !== 'completed') {
+      job.running[nodeId] = { ...job.running[nodeId], errors: 0 }
+      return
+    }
+    const media = resultMedia(result)
+    if (!media.length)
+      throw new Error('Higgsfield completed without supported media outputs.')
+    job.outputs[nodeId] = media
+    await this.save(job)
+    job.outputs[nodeId] = await Promise.all(
+      media.map((item, index) =>
+        archiveMedia(this.env, item, `outputs/${job.id}/${nodeId}/${index}`)
       )
+    )
+    this.complete(job, nodeId)
+    job.providerStatus = undefined
+    await this.save(job)
+  }
+}
+
+/** Whether a cancel request (by job id, a list of ids, or none for all) covers the job. */
+const cancelTarget = (
+  job: Job,
+  target: string | undefined,
+  ids: string[] | undefined
+) => (!target || target === job.id) && (!ids || ids.includes(job.id))
+
+/** Marks a job cancelled; a ledger-driven job is woken within a second. */
+function requestCancel(job: Job) {
+  job.cancelRequested = true
+  if (job.runner !== 'workflow')
+    job.due = Math.min(job.due ?? Infinity, Date.now() + 1000)
+  return job
+}
+
+/** How the job ends once nothing is left to follow, or null to keep going. */
+function settledOutcome(
+  job: Active
+): { status: Job['status']; error?: string } | null {
+  if (job.done.length >= job.order.length) return { status: 'completed' }
+  if (job.halted && !Object.keys(job.running).length) return job.halted
+  return null
+}
+
+const reason = (error: unknown, fallback: string) =>
+  error instanceof Error ? error.message : fallback
+
+/** A cancel accepted after the job's last save still wins over completion. */
+function finalState(
+  stored: Job | undefined,
+  status: Job['status'],
+  error: string | undefined
+): { status: Job['status']; error: string | undefined } {
+  if (status === 'completed' && stored?.cancelRequested)
+    return {
+      status: 'cancelled',
+      error: 'Workflow cancelled. Completed outputs remain in history.'
+    }
+  return { status, error }
+}
+
+/** Counts a failed status read against one node. After twelve in a row the
+ * node stops being followed (its paid output may exist at the provider) and
+ * the job ends once its other running nodes settle. */
+function pollFailed(job: Active, nodeId: string, error: unknown) {
+  const message = reason(error, 'Provider status unavailable')
+  const errors = (job.running[nodeId].errors ?? 0) + 1
+  job.lastPollError = message
+  if (errors < 12) {
+    job.running[nodeId] = { ...job.running[nodeId], errors }
+    return
+  }
+  delete job.running[nodeId]
+  job.halted ??= { status: 'failed', error: message, node: nodeId }
+}
+
+/** Every save picks up a cancel request from storage, so read this fresh. */
+const stopping = (job: Job) => Boolean(job.halted ?? job.cancelRequested)
+
+function stopReason(job: Job) {
+  if (job.rendering)
+    return 'Render was interrupted. Completed generation outputs remain in history; rerun a finishing-only workflow to avoid generating again.'
+  if (Date.now() - job.created > 60 * 60 * 1000)
+    return 'Polling stopped after one hour. The provider may still be running; check Higgsfield before rerunning.'
+  return null
+}
+
+/** A node still marked as submitting was cut off mid-request: its outcome is
+ * unknown, so it is never resubmitted and the job ends once the rest settle. */
+function haltUnknownSubmissions(job: Active) {
+  for (const [nodeId, run] of Object.entries(job.running)) {
+    if (!run.submitting) continue
+    delete job.running[nodeId]
+    job.halted ??= {
+      status: 'failed',
+      error:
+        'Submission outcome is unknown. Check Higgsfield request history before rerunning; no automatic retry was made.',
+      node: nodeId
     }
   }
 }

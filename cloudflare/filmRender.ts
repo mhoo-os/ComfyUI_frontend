@@ -55,8 +55,9 @@ const estimateSchema = z.union([
     .passthrough()
 ])
 
-/** The render engine is the existing job ledger (ComfyJobs): one active job,
- * reference re-approval before submission, and no automatic resubmission. */
+/** The render engine is the existing job ledger (ComfyJobs): a few active jobs
+ * at once, reference re-approval before submission, and no automatic
+ * resubmission. A full ledger refuses, and the attempt waits for a slot. */
 function comfyEngine(env: Env): FilmEngine & CutEngine {
   const jobs = () => env.COMFY_JOBS.getByName('owner')
   const call = (path: string, body?: unknown) =>
@@ -74,7 +75,7 @@ function comfyEngine(env: Env): FilmEngine & CutEngine {
     // Only the ledger's explicit queue_full is known to have created no job.
     if (isQueueFull(response.status, body))
       throw new RefusedError(
-        message(body, 'Another render is running. Try again when it finishes.')
+        message(body, 'Every render slot is busy. Try again when one finishes.')
       )
     if (!response.ok)
       throw new Error(
