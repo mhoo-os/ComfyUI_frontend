@@ -33,7 +33,9 @@ const modelSchema = z.object({
   source: z.string(),
   schema: z.object({
     properties: z.record(propertySchema),
-    required: z.array(z.string())
+    required: z.array(z.string()),
+    // At least one of these inputs must be set.
+    requiredAny: z.array(z.string()).optional()
   })
 })
 export const models = z.record(modelSchema).parse(catalog)
@@ -178,6 +180,8 @@ export function planGraph(value: unknown): { graph: Graph; order: string[] } {
         ])
       )
     )
+    // Fail before upstream nodes spend credits, not at this node's turn.
+    endpointFor(node)
     visiting.delete(id)
     visited.add(id)
     order.push(id)
@@ -212,9 +216,10 @@ export function endpointFor(node: Graph[string]): string {
     const prop = Object.hasOwn(model.schema.properties, key)
       ? model.schema.properties[key]
       : undefined
-    const value = Object.hasOwn(node.inputs, key)
-      ? node.inputs[key]
-      : prop?.default
+    const value =
+      Object.hasOwn(node.inputs, key) && node.inputs[key] !== ''
+        ? node.inputs[key]
+        : prop?.default
     if (!prop?.endpointParam || !prop.enum?.includes(value as string))
       throw new Error(`Unsupported ${key}.`)
     return String(value)
@@ -229,6 +234,7 @@ export function resolveInputs(
     throw new Error('Unsupported node')
   const model = models[node.class_type]
   const input: Input = {}
+  const set = new Set<string>()
   for (const [key, prop] of Object.entries(model.schema.properties)) {
     const raw = Object.hasOwn(node.inputs, key)
       ? node.inputs[key]
@@ -276,15 +282,20 @@ export function resolveInputs(
       !(imageInputs.includes(key) && referenceToken.test(String(value)))
     ) {
       const url = new URL(String(value))
+      const host = url.hostname.replace(/\.$/, '')
       if (
         url.protocol !== 'https:' ||
         url.username ||
         url.password ||
-        url.hostname === 'localhost' ||
-        /^[\d.[\]:]+$/.test(url.hostname)
+        host === 'localhost' ||
+        host.endsWith('.localhost') ||
+        // IP literals: dotted IPv4 (the URL parser normalizes other forms) and any bracketed IPv6.
+        /^[\d.]+$/.test(host) ||
+        host.startsWith('[')
       )
         throw new Error('Media inputs must use public HTTPS URLs.')
     }
+    set.add(key)
     if (prop.endpointParam) continue
     const field = prop.providerField ?? key
     if (prop.asArray) {
@@ -295,6 +306,9 @@ export function resolveInputs(
       ]
     } else input[field] = value
   }
+  const any = model.schema.requiredAny
+  if (any && !any.some((key) => set.has(key)))
+    throw new Error(`${model.title}: set one of ${any.join(', ')}.`)
   if (node.class_type === 'HiggsfieldSoul' && input.custom_reference_id)
     z.number().positive().max(1).parse(input.custom_reference_strength)
   return node.class_type === 'HiggsfieldTalkingShot'

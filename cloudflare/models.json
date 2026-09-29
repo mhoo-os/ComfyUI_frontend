@@ -769,7 +769,8 @@
           "default": false
         }
       },
-      "required": ["image_url"]
+      "required": [],
+      "requiredAny": ["image_url", "reference_image_url", "video_url"]
     }
   }
 }

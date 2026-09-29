@@ -176,6 +176,31 @@ describe('Video input and motion target submission boundary', () => {
         bitrate_mode: 'high',
         generate_audio: false
       }
+    },
+    {
+      node: 'HiggsfieldSeedanceReference',
+      inputs: { prompt: 'Follow this motion.', video_url: clip },
+      endpoint: 'bytedance/seedance-2.5/reference-to-video',
+      body: {
+        prompt: 'Follow this motion.',
+        video_urls: [clip],
+        duration: 5,
+        resolution: '720p',
+        aspect_ratio: '16:9',
+        bitrate_mode: 'high',
+        generate_audio: false
+      }
+    },
+    {
+      node: 'HiggsfieldKling3MotionControl',
+      inputs: { mode: '', image_url: still, video_url: clip },
+      endpoint: 'kling-video/v3/motion-control/std',
+      body: {
+        image_url: still,
+        video_url: clip,
+        character_orientation: 'video',
+        keep_original_sound: 'yes'
+      }
     }
   ])(
     '$node resolves to the documented provider request',
@@ -310,8 +335,33 @@ describe('Video input and motion target submission boundary', () => {
     ],
     [
       'HiggsfieldSeedanceReference',
-      { prompt: 'x', video_url: clip },
-      'image_url is required'
+      { prompt: 'x' },
+      'set one of image_url, reference_image_url, video_url'
+    ],
+    [
+      'HiggsfieldKling3MotionControl',
+      { image_url: still, video_url: 'https://[fd00::1]/motion.mp4' },
+      'public HTTPS'
+    ],
+    [
+      'HiggsfieldKling3MotionControl',
+      { image_url: still, video_url: 'https://[fe80::1]/motion.mp4' },
+      'public HTTPS'
+    ],
+    [
+      'HiggsfieldKling3MotionControl',
+      { image_url: still, video_url: 'https://localhost./motion.mp4' },
+      'public HTTPS'
+    ],
+    [
+      'HiggsfieldKling3MotionControl',
+      { image_url: still, video_url: 'https://media.localhost/motion.mp4' },
+      'public HTTPS'
+    ],
+    [
+      'HiggsfieldKling3MotionControl',
+      { image_url: still, video_url: 'https://0x7f.1/motion.mp4' },
+      'public HTTPS'
     ],
     [
       'HiggsfieldSeedanceReference',
