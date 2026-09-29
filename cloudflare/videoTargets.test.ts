@@ -436,3 +436,64 @@ describe('Video input and motion target submission boundary', () => {
     ).toThrow('Connect URLs only')
   })
 })
+
+describe('Kling O3 image-reference contracts', () => {
+  it('combines reference sockets and lists while keeping first and last frames distinct', () => {
+    expect(
+      resolve('HiggsfieldKlingO3Reference', {
+        prompt: 'A traveller enters.',
+        image_url: still,
+        end_image_url: end,
+        reference_image_url: second,
+        image_urls: token,
+        mode: 'pro'
+      })
+    ).toEqual({
+      endpoint: 'kling-video/o3/image-reference',
+      body: {
+        prompt: 'A traveller enters.',
+        first_frame_url: still,
+        last_frame_url: end,
+        image_urls: [second, token],
+        mode: 'pro',
+        duration: 5,
+        sound: 'off',
+        multi_shots: false,
+        shot_type: 'customize'
+      }
+    })
+  })
+
+  it('allows a single shot without optional references', () => {
+    expect(
+      resolve('HiggsfieldKlingO3Reference', { prompt: 'A mountain lake' }).body
+    ).toMatchObject({
+      prompt: 'A mountain lake',
+      duration: 5,
+      multi_shots: false
+    })
+  })
+
+  it.for<Graph[string]['inputs']>([
+    { prompt: '   ' },
+    { prompt: 'x'.repeat(2501) },
+    { prompt: 'x', multi_shots: true },
+    {
+      prompt: 'x',
+      multi_shots: true,
+      shot_type: 'intelligent',
+      multi_prompt: '[]'
+    },
+    {
+      prompt: 'x',
+      multi_shots: true,
+      multi_prompt: '[{"prompt":"x","duration":0}]'
+    },
+    { prompt: 'x', multi_prompt: '[{"prompt":"x","duration":3}]' }
+  ])(
+    'rejects invalid O3 prompts and shot controls %j before execution',
+    (inputs) => {
+      expect(() => resolve('HiggsfieldKlingO3Reference', inputs)).toThrow()
+    }
+  )
+})

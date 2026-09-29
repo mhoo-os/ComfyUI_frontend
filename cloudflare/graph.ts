@@ -357,6 +357,12 @@ export function resolveInputs(
         `${key} accepts at most ${prop.maxItems} references, including single inputs.`
       )
   }
+  if (node.class_type === 'HiggsfieldKlingO3Reference') {
+    if (!z.string().parse(input.prompt).trim())
+      throw new Error('Kling O3 requires a nonempty top-level prompt.')
+    if (input.multi_shots === true && !input.multi_prompt)
+      throw new Error('Kling O3 multi_shots requires 1–6 custom shots.')
+  }
   if (input.multi_prompt) {
     if (input.multi_shots !== true)
       throw new Error('Enable multi_shots to use custom shots.')

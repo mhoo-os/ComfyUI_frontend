@@ -5404,6 +5404,8 @@
     "uploadFailed": "Upload failed. Please try again.",
     "uploaded": "Reference image uploaded",
     "videoUploaded": "Video uploaded",
+    "audioUploaded": "Audio reference uploaded and added to the list",
+    "audioTooLarge": "WAV audio must be no larger than 20 MB.",
     "estimate": "Estimate Higgsfield cost",
     "estimateFailed": "Could not estimate this node.",
     "estimateLinked": "Set a public image URL to estimate this node before running linked inputs.",

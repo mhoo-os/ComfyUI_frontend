@@ -18,10 +18,11 @@ Each job persists its runner; alarms only launch Workflows for talking-shot jobs
 
 ## Implemented browser tools
 
-Feature-detected WebMCP exposes getCanvasState, updateNodeParameter,
+Feature-detected WebMCP exposes getProductionCapabilities, getCanvasState, updateNodeParameter,
 queueCanvasWorkflow and getProductionJob. Current browser/spec use
 `document.modelContext`; navigator is a compatibility fallback. Registration uses
 `inputSchema`, not `parameters`. Unknown browsers retain the normal interface.
+Capability discovery returns implemented model schemas, source links and upload limits without submitting a generation.
 Updates require a fresh graph revision, validate primitive types/ranges/options,
 preserve widget callbacks/change tracking and refuse connected inputs.
 Paid generation is disabled through WebMCP until a user-held approval mechanism

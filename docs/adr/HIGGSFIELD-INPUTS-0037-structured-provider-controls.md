@@ -23,8 +23,8 @@ duration when custom shots are supplied; the provider sums their durations for
 generation and billing, and its optional scalar has a separate 15-second bound.
 
 Use model output kind to accept generated videos in finishing; retain private
-archive validation before rendering. Include the engine suite in the existing
-unit Actions workflow.
+archive validation before rendering. The proposed engine-suite addition to the unit Actions workflow remains
+blocked by the existing GitHub workflow permission; engine tests run locally.
 
 Changing all graph inputs to arbitrary arrays was rejected because it would
 make links ambiguous and require a broader workflow migration. Separate numbered

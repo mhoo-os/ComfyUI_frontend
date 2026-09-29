@@ -37,12 +37,14 @@ app.registerExtension({
           'end_image_url',
           'reference_image_url',
           'video_url',
+          'audio_urls',
           'music_url',
           'logo_url'
         ].includes(widget.name)
       )
         continue
       const video = widget.name === 'video_url'
+      const audio = widget.name === 'audio_urls'
       if (
         !production &&
         ['image_url', 'end_image_url', 'reference_image_url'].includes(
@@ -96,9 +98,11 @@ app.registerExtension({
             ? production
               ? 'video/mp4,video/webm'
               : 'video/mp4'
-            : widget.name === 'music_url'
-              ? 'audio/mpeg,audio/wav,audio/x-wav,audio/mp4'
-              : 'image/jpeg,image/png,image/webp,image/gif'
+            : audio
+              ? 'audio/wav,audio/x-wav'
+              : widget.name === 'music_url'
+                ? 'audio/mpeg,audio/wav,audio/x-wav,audio/mp4'
+                : 'image/jpeg,image/png,image/webp,image/gif'
           input.onchange = async () => {
             const file = input.files?.[0]
             if (!file) return
@@ -113,7 +117,9 @@ app.registerExtension({
                       ? 'higgsfield.productionTooLarge'
                       : video
                         ? 'higgsfield.videoTooLarge'
-                        : 'higgsfield.tooLarge'
+                        : audio
+                          ? 'higgsfield.audioTooLarge'
+                          : 'higgsfield.tooLarge'
                   )
                 )
                 return
@@ -137,8 +143,13 @@ app.registerExtension({
                 return
               }
               const result = uploadResult.parse(await response.json())
-              widget.value = result.url
-              widget.callback?.(result.url)
+              const value = audio
+                ? [String(widget.value).trim(), result.url]
+                    .filter(Boolean)
+                    .join('\n')
+                : result.url
+              widget.value = value
+              widget.callback?.(value)
               node.setDirtyCanvas(true, true)
               useToastStore().add({
                 severity: 'success',
@@ -147,7 +158,9 @@ app.registerExtension({
                     ? 'higgsfield.productionUploaded'
                     : video
                       ? 'higgsfield.videoUploaded'
-                      : 'higgsfield.uploaded'
+                      : audio
+                        ? 'higgsfield.audioUploaded'
+                        : 'higgsfield.uploaded'
                 ),
                 life: 4000
               })

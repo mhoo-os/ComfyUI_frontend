@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
+import { api } from '@/scripts/api'
+
 import { LGraph, LGraphNode } from '@/lib/litegraph/src/litegraph'
 import { app } from '@/scripts/app'
 import { graphToPrompt } from '@/utils/executionUtil'
@@ -76,13 +78,14 @@ describe('Higgsfield native node controls', () => {
   })
 
   it.for([
-    [ReferenceNode, 'video/mp4'],
-    [ProductionNode, 'video/mp4,video/webm']
+    [ReferenceNode, 'video_url', 'video/mp4'],
+    [ReferenceNode, 'audio_urls', 'audio/wav,audio/x-wav'],
+    [ProductionNode, 'video_url', 'video/mp4,video/webm']
   ] as const)(
-    'offers only the video types each backend accepts (%o → %s)',
-    ([Node, accept]) => {
+    'offers the media types each backend accepts (%o %s → %s)',
+    ([Node, field, accept]) => {
       const node = new Node('Video')
-      node.addWidget('text', 'video_url', '', () => {})
+      node.addWidget('text', field, '', () => {})
       extension.nodeCreated?.(node, app)
       const picker = document.createElement('input')
       vi.spyOn(picker, 'click').mockImplementation(() => {})
@@ -111,4 +114,41 @@ describe('Higgsfield native node controls', () => {
     extension.nodeCreated?.(node, app)
     expect(node.widgets ?? []).toHaveLength(0)
   })
+})
+
+it('uploads WAV audio and appends its URL without losing existing references', async () => {
+  const node = new ReferenceNode('Audio reference')
+  const changed = vi.fn()
+  const widget = node.addWidget(
+    'text',
+    'audio_urls',
+    'https://example.com/first.wav',
+    changed
+  )
+  extension.nodeCreated?.(node, app)
+  const picker = document.createElement('input')
+  vi.spyOn(picker, 'click').mockImplementation(() => {})
+  const create = document.createElement.bind(document)
+  vi.spyOn(document, 'createElement').mockImplementation((tag: string) =>
+    tag === 'input' ? picker : create(tag)
+  )
+  const file = new File(['RIFFexample'], 'reference.wav', { type: 'audio/wav' })
+  const transfer = new DataTransfer()
+  transfer.items.add(file)
+  vi.spyOn(picker, 'files', 'get').mockReturnValue(transfer.files)
+  vi.mocked(api.fetchApi).mockResolvedValue(
+    Response.json({ url: 'https://cdn.example.com/new.wav' })
+  )
+  const upload = node.widgets?.find((item) => item.name === 'higgsfield.upload')
+  upload?.callback?.(upload.value, app.canvas, node, [0, 0])
+  await picker.onchange?.call(picker, new Event('change'))
+  expect(api.fetchApi).toHaveBeenCalledWith('/higgsfield/upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'audio/wav' },
+    body: file
+  })
+  const expected =
+    'https://example.com/first.wav\nhttps://cdn.example.com/new.wav'
+  expect(widget.value).toBe(expected)
+  expect(changed).toHaveBeenCalledWith(expected)
 })

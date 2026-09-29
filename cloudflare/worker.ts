@@ -7,8 +7,8 @@ import { attemptRoute } from './filmRender'
 import { reviewRoute } from './reviewer'
 import { routeShot, expandShot } from './planner'
 import { models, nodeDefinitions } from './graph'
-import { boundedJson, json } from './jobs'
-import { uploadMedia } from './media'
+import { boundedJson, json, maxActiveJobs } from './jobs'
+import { uploadMedia, uploadLimits } from './media'
 import { uploadProductionMedia } from './rendering'
 import { userData } from './userData'
 
@@ -97,10 +97,19 @@ export default {
             node,
             name: model.title,
             endpoint: model.endpoint,
-            source: model.source
+            source: model.source,
+            kind: model.kind,
+            schema: model.schema
           })),
           max_nodes: 32,
-          max_concurrent_workflows: 1
+          max_concurrent_workflows: maxActiveJobs,
+          uploads: uploadLimits,
+          schema_format: 'engine-node-inputs',
+          limitations: [
+            'Schemas describe engine node inputs. URI lists and custom-shot arrays use text widgets and are translated before provider submission.',
+            'Configured credentials do not prove account access to every model.',
+            'Standalone speech, music, sound effects and upscaling are not implemented.'
+          ]
         })
       if (path.startsWith('/userdata')) return userData(request, env, path, url)
       if (path === '/settings' || path.startsWith('/settings/')) {

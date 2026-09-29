@@ -24,36 +24,43 @@ const imageTypes = [
   'image/gif'
 ]
 
-const uploadLimits: Record<string, number> = {
+export const uploadLimits: Record<string, number> = {
   ...Object.fromEntries(imageTypes.map((type) => [type, 20 * 1024 * 1024])),
   // Kling motion control compresses larger videos; we don't relay more.
-  'video/mp4': 100 * 1024 * 1024
+  'video/mp4': 100 * 1024 * 1024,
+  'audio/wav': 20 * 1024 * 1024,
+  'audio/x-wav': 20 * 1024 * 1024
 }
 
-/** Relays one image or MP4 to Higgsfield's presigned storage. Video is
+/** Relays one image, WAV or MP4 to Higgsfield's presigned storage. Audio/video is
  * streamed at its declared length rather than buffered in Worker memory.
  * The upload helpers are tested through Miniflare, which fallow can't follow. */
 // fallow-ignore-next-line complexity
 export async function uploadMedia(request: Request, env: Env) {
   const contentType = request.headers.get('content-type') ?? ''
   if (!Object.hasOwn(uploadLimits, contentType))
-    throw new Error('Choose a JPEG, PNG, WebP or GIF image, or an MP4 video.')
-  const video = contentType === 'video/mp4'
+    throw new Error(
+      'Choose a JPEG, PNG, WebP or GIF image, an MP4 video, or WAV audio.'
+    )
+  const streamed =
+    contentType === 'video/mp4' || contentType.startsWith('audio/')
   // Validate before asking the provider for an upload URL.
-  const body = video
-    ? videoBody(request, uploadLimits[contentType])
+  const body = streamed
+    ? streamBody(request, uploadLimits[contentType])
     : await readImage(request, uploadLimits[contentType])
   const upload = uploadSchema.parse(
     await provider(env, 'files/generate-upload-url', {
       content_type: contentType
     })
   )
+  if (upload.content_type !== contentType)
+    throw new Error('Provider upload content type does not match the file.')
   const response = await fetch(upload.upload_url, {
     method: 'PUT',
     headers: upload.upload_headers,
     body: body instanceof Uint8Array ? body : body(),
     redirect: 'manual',
-    signal: AbortSignal.timeout(video ? 300000 : 60000)
+    signal: AbortSignal.timeout(streamed ? 300000 : 60000)
   })
   await response.body?.cancel()
   if (!response.ok) throw new Error('Upload failed. Try again.')
@@ -66,7 +73,7 @@ export async function uploadMedia(request: Request, env: Env) {
 /** Returns a starter for the bounded stream, so nothing is read until the
  * upload URL exists. */
 // fallow-ignore-next-line complexity
-function videoBody(request: Request, limit: number) {
+function streamBody(request: Request, limit: number) {
   const declared = Number(request.headers.get('content-length'))
   const source = request.body
   if (
@@ -75,7 +82,9 @@ function videoBody(request: Request, limit: number) {
     declared > limit ||
     !source
   )
-    throw new Error('Videos must be between 1 byte and 100 MB.')
+    throw new Error(
+      `Media must be between 1 byte and ${limit / 1024 / 1024} MB.`
+    )
   return () => {
     const bounded = new FixedLengthStream(declared)
     // FixedLengthStream errors if the body is shorter or longer than declared.

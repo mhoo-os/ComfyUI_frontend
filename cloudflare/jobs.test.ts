@@ -1700,40 +1700,53 @@ describe('Video inputs and endpoint selection', () => {
     keep_original_sound: 'yes'
   }
 
-  it('streams an MP4 to provider storage with the video content type', async () => {
-    const mp4 = new Uint8Array(4096).fill(7)
-    const mf = await runtime(async (request) => {
-      if (request.url.endsWith('/files/generate-upload-url')) {
-        expect(await request.json()).toEqual({ content_type: 'video/mp4' })
-        return Response.json({
-          public_url: 'https://uploads.example.com/motion.mp4',
-          upload_url: 'https://uploads.example.com/put',
-          content_type: 'video/mp4',
-          upload_headers: { 'Content-Type': 'video/mp4' }
-        })
-      }
-      expect(request.method).toBe('PUT')
-      expect(request.headers.get('authorization')).toBeNull()
-      expect(request.headers.get('content-type')).toBe('video/mp4')
-      expect(request.headers.get('content-length')).toBe(String(mp4.length))
-      expect(new Uint8Array(await request.arrayBuffer())).toEqual(mp4)
-      return new Response(null, { status: 200 })
-    })
-    const response = await mf.dispatchFetch('https://test/higgsfield/upload', {
-      method: 'POST',
-      headers: {
-        'content-type': 'video/mp4',
-        'content-length': String(mp4.length)
-      },
-      body: mp4
-    })
-    expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({
-      url: 'https://uploads.example.com/motion.mp4'
-    })
-  })
+  it.for(['video/mp4', 'audio/wav', 'audio/x-wav'])(
+    'streams %s to provider storage without forwarding credentials',
+    async (contentType) => {
+      const mp4 = new Uint8Array(4096).fill(7)
+      const mf = await runtime(async (request) => {
+        if (request.url.endsWith('/files/generate-upload-url')) {
+          expect(await request.json()).toEqual({ content_type: contentType })
+          return Response.json({
+            public_url: 'https://uploads.example.com/motion.mp4',
+            upload_url: 'https://uploads.example.com/put',
+            content_type: contentType,
+            upload_headers: { 'Content-Type': contentType }
+          })
+        }
+        expect(request.method).toBe('PUT')
+        expect(request.headers.get('authorization')).toBeNull()
+        expect(request.headers.get('cookie')).toBeNull()
+        expect(request.headers.get('content-type')).toBe(contentType)
+        expect(request.headers.get('content-length')).toBe(String(mp4.length))
+        expect(new Uint8Array(await request.arrayBuffer())).toEqual(mp4)
+        return new Response(null, { status: 200 })
+      })
+      const response = await mf.dispatchFetch(
+        'https://test/higgsfield/upload',
+        {
+          method: 'POST',
+          headers: {
+            cookie: 'owner-session',
+            authorization: 'Bearer owner-credential',
+            'content-type': contentType,
+            'content-length': String(mp4.length)
+          },
+          body: mp4
+        }
+      )
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({
+        url: 'https://uploads.example.com/motion.mp4'
+      })
+    }
+  )
 
   it.for([
+    ['audio/mpeg', '4', '4'],
+    ['audio/wav', String(20 * 1024 * 1024 + 1), '4'],
+    ['audio/x-wav', '', '4'],
+    ['audio/wav', '0', '4'],
     ['video/webm', '4', '4'],
     ['video/quicktime', '4', '4'],
     ['video/mp4', String(100 * 1024 * 1024 + 1), '4'],
@@ -1763,28 +1776,31 @@ describe('Video inputs and endpoint selection', () => {
     }
   )
 
-  it('fails an MP4 upload whose body is shorter than its declared length', async () => {
-    const mf = await runtime(async (request) => {
-      if (request.url.endsWith('/files/generate-upload-url'))
-        return Response.json({
-          public_url: 'https://uploads.example.com/motion.mp4',
-          upload_url: 'https://uploads.example.com/put',
-          content_type: 'video/mp4',
-          upload_headers: { 'Content-Type': 'video/mp4' }
-        })
-      await request.arrayBuffer()
-      return new Response(null, { status: 200 })
-    })
-    const response = await mf.dispatchFetch(
-      'https://test/test/declared-upload',
-      {
-        method: 'POST',
-        headers: { 'content-type': 'video/mp4', 'x-declared-length': '64' },
-        body: 'clip'
-      }
-    )
-    expect(response.status).toBe(400)
-  })
+  it.for(['video/mp4', 'audio/wav'])(
+    'fails a %s upload whose body is shorter than its declared length',
+    async (contentType) => {
+      const mf = await runtime(async (request) => {
+        if (request.url.endsWith('/files/generate-upload-url'))
+          return Response.json({
+            public_url: 'https://uploads.example.com/motion.mp4',
+            upload_url: 'https://uploads.example.com/put',
+            content_type: contentType,
+            upload_headers: { 'Content-Type': contentType }
+          })
+        await request.arrayBuffer()
+        return new Response(null, { status: 200 })
+      })
+      const response = await mf.dispatchFetch(
+        'https://test/test/declared-upload',
+        {
+          method: 'POST',
+          headers: { 'content-type': contentType, 'x-declared-length': '64' },
+          body: 'clip'
+        }
+      )
+      expect(response.status).toBe(400)
+    }
+  )
 
   it('estimates and submits to the endpoint chosen by mode, without sending mode', async () => {
     const sent: { path: string; body: unknown }[] = []
@@ -1824,4 +1840,78 @@ describe('Video inputs and endpoint selection', () => {
     expect(response.status).toBeGreaterThanOrEqual(400)
     expect(calls).toBe(0)
   })
+})
+
+describe('Kling O3 image-reference ledger', () => {
+  it('quotes and submits identical custom-shot payloads without scalar duration', async () => {
+    const sent: { path: string; body: unknown }[] = []
+    const mf = await runtime(async (request) => {
+      const path = new URL(request.url).pathname
+      if (request.method === 'POST') {
+        sent.push({ path, body: await request.json() })
+        return path.startsWith('/estimate/')
+          ? Response.json({ type: 'estimate', usd: '1', credits: '10' })
+          : Response.json({ request_id: requestId, status: 'queued' })
+      }
+      return Response.json({ request_id: requestId, status: 'queued' })
+    })
+    const shots = [
+      { prompt: 'Wide shot', duration: 10 },
+      { prompt: 'Close up', duration: 8 }
+    ]
+    const prompt = {
+      shot: {
+        class_type: 'HiggsfieldKlingO3Reference',
+        inputs: {
+          prompt: 'A traveller enters.',
+          image_urls: 'https://cdn.example.com/reference.png',
+          multi_shots: true,
+          multi_prompt: JSON.stringify(shots)
+        }
+      }
+    }
+    const estimate = await mf.dispatchFetch(
+      'https://test/higgsfield/estimate',
+      {
+        method: 'POST',
+        body: JSON.stringify({ prompt })
+      }
+    )
+    expect(estimate.status).toBe(200)
+    await queue(mf, prompt)
+    await tick(mf)
+    const body = {
+      prompt: 'A traveller enters.',
+      image_urls: ['https://cdn.example.com/reference.png'],
+      mode: 'std',
+      sound: 'off',
+      multi_shots: true,
+      multi_prompt: shots,
+      shot_type: 'customize'
+    }
+    expect(sent).toEqual([
+      { path: '/estimate/kling-video/o3/image-reference', body },
+      { path: '/kling-video/o3/image-reference', body }
+    ])
+  })
+})
+
+it('refuses a presigned upload with a mismatched content type before sending bytes', async () => {
+  const sent: string[] = []
+  const mf = await runtime(async (request) => {
+    sent.push(request.url)
+    return Response.json({
+      public_url: 'https://uploads.example.com/file',
+      upload_url: 'https://uploads.example.com/put',
+      content_type: 'video/mp4',
+      upload_headers: { 'Content-Type': 'video/mp4' }
+    })
+  })
+  const response = await mf.dispatchFetch('https://test/test/declared-upload', {
+    method: 'POST',
+    headers: { 'content-type': 'audio/wav', 'x-declared-length': '4' },
+    body: 'RIFF'
+  })
+  expect(response.status).toBe(400)
+  expect(sent).toEqual(['https://api.higgsfield.ai/files/generate-upload-url'])
 })

@@ -94,3 +94,31 @@ describe('production browser tools', () => {
     expect(api.queuePrompt).not.toHaveBeenCalled()
   })
 })
+
+it('discovers engine capabilities without queuing generation or mutating the canvas', async () => {
+  const f = fixture()
+  const before = await f.revision()
+  const capabilities = {
+    configured: true,
+    models: [{ node: 'HiggsfieldKlingO3Reference', kind: 'video' }],
+    uploads: { 'audio/wav': 20971520 }
+  }
+  vi.spyOn(api, 'fetchApi').mockResolvedValue(Response.json(capabilities))
+  const result = await f.call('getProductionCapabilities')
+  expect(result).not.toHaveProperty('isError')
+  expect(JSON.parse(result.content[0].text)).toEqual(capabilities)
+  expect(api.fetchApi).toHaveBeenCalledWith('/higgsfield/capabilities')
+  expect(api.queuePrompt).not.toHaveBeenCalled()
+  expect(await f.revision()).toBe(before)
+})
+
+it('reports inaccessible capabilities as an error', async () => {
+  const f = fixture()
+  vi.spyOn(api, 'fetchApi').mockResolvedValue(
+    new Response(null, { status: 403 })
+  )
+  expect(await f.call('getProductionCapabilities')).toHaveProperty(
+    'isError',
+    true
+  )
+})

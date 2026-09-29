@@ -27,7 +27,7 @@ const submissionSchema = z.object({
     .optional()
 })
 /** How many jobs may run at once. A further submission is refused with queue_full. */
-const maxActiveJobs = 4
+export const maxActiveJobs = 4
 /** How many paid nodes of one job may be at the provider at once. */
 const maxNodesInFlight = 4
 
