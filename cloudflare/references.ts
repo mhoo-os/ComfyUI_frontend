@@ -15,6 +15,17 @@ const limit = 20 * 1024 * 1024
 const prefix = 'reference:'
 const useKey = (id: string) => `reference-use:${id}`
 const keyFor = (id: string) => `character-assets/${id}`
+// Provider fields that may carry approved image references.
+const imageFields = [
+  'image_url',
+  'end_image_url',
+  'last_image_url',
+  'first_frame_url',
+  'last_frame_url',
+  'image_urls',
+  'input_images',
+  'input_images_end'
+]
 const revisionRequest = z
   .object({
     id: z.string().uuid(),
@@ -414,16 +425,7 @@ export class ReferenceLibrary {
       for (const item of Array.isArray(value) ? value : [value]) {
         if (typeof item !== 'string' || !item.startsWith('mhoo-asset:'))
           continue
-        if (
-          ![
-            'image_url',
-            'end_image_url',
-            'last_image_url',
-            'image_urls',
-            'input_images',
-            'input_images_end'
-          ].includes(field)
-        )
+        if (!imageFields.includes(field))
           throw new Error(
             'Private references are only supported in image inputs.'
           )
@@ -439,17 +441,7 @@ export class ReferenceLibrary {
         )
     }
     for (const [field, value] of Object.entries(input)) {
-      if (
-        ![
-          'image_url',
-          'end_image_url',
-          'last_image_url',
-          'image_urls',
-          'input_images',
-          'input_images_end'
-        ].includes(field)
-      )
-        continue
+      if (!imageFields.includes(field)) continue
       const values = Array.isArray(value) ? value : [value]
       const resolved: string[] = []
       for (const item of values) {

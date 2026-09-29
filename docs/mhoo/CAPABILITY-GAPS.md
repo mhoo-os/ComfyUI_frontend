@@ -12,7 +12,9 @@ Cloudflare Pages serves the native canvas. The Access-protected Worker translate
 | Reference image editing                                             | Marketing Studio reference node; URL or native local upload; connected generated images                  | One reference per node; provider supports up to 16. Preset enhancement/catalog and multiple-reference controls are not exposed.                                                                                                         |
 | Text to video                                                       | Seedance 2.5 with duration, resolution, framing, audio, bitrate and format                               | Paid talking-shot generation, exact transcript, R2 playback and reload persistence passed. Precise lip-sync quality still needs human review.                                                                                           |
 | Image to video                                                      | Seedance 2.5 with starting and optional ending image; both accept graph links                            | Paid first/last-frame acceptance remains pending.                                                                                                                                                                                       |
-| File upload                                                         | Native node buttons; JPEG, PNG, WebP or GIF up to 20 MB; provider presigned upload performed server-side | Video/audio uploads are not exposed. Uploaded inputs remain subject to provider retention.                                                                                                                                              |
+| Stronger video targets                                              | Kling 3.0 Pro, Kling O3 first/last frame, Cinema Studio 4.0 presets, Seedance 2.5 reference-to-video     | Kling multi-shot (`multi_prompt`) and account-bound `elements` are not exposed. Two image and one video reference per node. Generated audio is off by default. No paid acceptance run yet.                                              |
+| Motion transfer                                                     | Kling 3.0 Motion Control (std/pro) and Genjutsu Motion Transfer from a URL, MP4 upload or linked video   | The provider, not the adapter, checks clip length (3–30 s Kling, at least 4 s Genjutsu). Library tokens are images only, so `video_url` has no library path. No paid acceptance run yet.                                                |
+| File upload                                                         | Native node buttons; JPEG, PNG, WebP or GIF up to 20 MB, or MP4 up to 100 MB; presigned upload in Worker | Audio upload to Higgsfield is not exposed. Uploaded inputs remain subject to provider retention.                                                                                                                                        |
 | Output retention                                                    | New generated images/videos copied to private R2; authenticated playback supports byte ranges            | Existing historical outputs are not backfilled. Archive requires a known size up to 250 MB; failures preserve provider URLs and stop after bounded retries. R2 storage is persistent until deliberately deleted, not a separate backup. |
 | Canvas and workflows                                                | Native nodes, links, saved/opened workflows, settings, JSON import/export                                | Imported Python/GPU workflows are rejected before any paid submission.                                                                                                                                                                  |
 | Execution                                                           | Up to eight nodes, sequential topological execution; first media output flows through connected URLs     | One active workflow per owner. No parallel execution or individual selection among a batch's media outputs.                                                                                                                             |
@@ -132,3 +134,16 @@ Generated-keyframe approval and cross-shot identity evaluation remain separate
 production gates. The initial training UI permits one saved attempt and does not
 automatically retry uncertain submissions. Existing direct Higgsfield upload buttons
 remain a separate explicitly initiated transfer path, not private-library ingest.
+
+## Video inputs and motion targets — 29 September 2026
+
+Higgsfield nodes accept a `video_url` input: a public HTTPS URL, an MP4 uploaded
+through the node's upload button (streamed, up to 100 MB), or the output of a
+generated video node. New nodes: Kling 3.0 Motion Control, Genjutsu Motion
+Transfer, Kling 3.0 Pro, Kling O3 first/last frame, Cinema Studio 4.0 and
+Seedance 2.5 reference-to-video. Each exposes only documented parameters and is
+covered by request-shape, validation and estimate tests against a mocked
+provider. No paid generation has been run on these nodes.
+
+Audio remains unavailable: the public Higgsfield API documents no text-to-speech,
+voice or lip-sync endpoint, and these nodes carry no audio references.

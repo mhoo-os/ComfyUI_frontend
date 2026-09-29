@@ -35,13 +35,20 @@ app.registerExtension({
         ![
           'image_url',
           'end_image_url',
+          'reference_image_url',
           'video_url',
           'music_url',
           'logo_url'
         ].includes(widget.name)
       )
         continue
-      if (!production && ['image_url', 'end_image_url'].includes(widget.name)) {
+      const video = widget.name === 'video_url'
+      if (
+        !production &&
+        ['image_url', 'end_image_url', 'reference_image_url'].includes(
+          widget.name
+        )
+      ) {
         node.addWidget(
           'button',
           t('referenceLibrary.title'),
@@ -84,22 +91,29 @@ app.registerExtension({
         () => {
           const input = document.createElement('input')
           input.type = 'file'
-          input.accept =
-            widget.name === 'video_url'
+          // Higgsfield accepts MP4 only; finishing nodes also take WebM.
+          input.accept = video
+            ? production
               ? 'video/mp4,video/webm'
-              : widget.name === 'music_url'
-                ? 'audio/mpeg,audio/wav,audio/x-wav,audio/mp4'
-                : 'image/jpeg,image/png,image/webp,image/gif'
+              : 'video/mp4'
+            : widget.name === 'music_url'
+              ? 'audio/mpeg,audio/wav,audio/x-wav,audio/mp4'
+              : 'image/jpeg,image/png,image/webp,image/gif'
           input.onchange = async () => {
             const file = input.files?.[0]
             if (!file) return
             try {
-              if (file.size > (production ? 80 : 20) * 1024 * 1024) {
+              if (
+                file.size >
+                (production ? 80 : video ? 100 : 20) * 1024 * 1024
+              ) {
                 useToastStore().addAlert(
                   t(
                     production
                       ? 'higgsfield.productionTooLarge'
-                      : 'higgsfield.tooLarge'
+                      : video
+                        ? 'higgsfield.videoTooLarge'
+                        : 'higgsfield.tooLarge'
                   )
                 )
                 return
@@ -131,7 +145,9 @@ app.registerExtension({
                 summary: t(
                   production
                     ? 'higgsfield.productionUploaded'
-                    : 'higgsfield.uploaded'
+                    : video
+                      ? 'higgsfield.videoUploaded'
+                      : 'higgsfield.uploaded'
                 ),
                 life: 4000
               })

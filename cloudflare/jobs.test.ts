@@ -1208,6 +1208,50 @@ describe('Private character reference review', () => {
       }
     ])
   })
+  it('quotes Kling O3 with an approved first frame sent as first_frame_url', async () => {
+    const sent: { path: string; body: unknown }[] = []
+    const mf = await runtime(async (request) => {
+      sent.push({
+        path: new URL(request.url).pathname,
+        body: await request.json()
+      })
+      return Response.json({ type: 'estimate', usd: '0.4', credits: '6' })
+    })
+    const asset = await describeAsset(mf, await upload(mf))
+    expect((await review(mf, asset)).status).toBe(200)
+    const response = await mf.dispatchFetch(
+      'https://test/higgsfield/estimate',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          prompt: {
+            '1': {
+              class_type: 'HiggsfieldKlingO3FirstLast',
+              inputs: {
+                prompt: 'A person turns to the window.',
+                image_url: `mhoo-asset:${asset.id}:${asset.revision}`,
+                end_image_url: 'https://cdn.example.com/end.png'
+              }
+            }
+          }
+        })
+      }
+    )
+    expect(response.status).toBe(200)
+    expect(sent).toEqual([
+      {
+        path: '/estimate/kling-video/o3/first-last-frame',
+        body: {
+          prompt: expect.stringContaining('A person turns to the window.'),
+          first_frame_url: 'https://example.com/approved-reference.jpg',
+          last_frame_url: 'https://cdn.example.com/end.png',
+          mode: 'std',
+          duration: 5,
+          sound: 'off'
+        }
+      }
+    ])
+  })
   it('resolves approved bytes only at execution and never sends a private token to generation', async () => {
     const paths: string[] = []
     const mf = await runtime(async (request) => {
@@ -1484,4 +1528,148 @@ describe('Private character reference review', () => {
       ).toHaveLength(1)
     }
   )
+})
+
+describe('Video inputs and endpoint selection', () => {
+  const motion = (mode: string) => ({
+    '1': {
+      class_type: 'HiggsfieldKling3MotionControl',
+      inputs: {
+        mode,
+        image_url: 'https://uploads.example.com/character.png',
+        video_url: 'https://uploads.example.com/motion.mp4'
+      }
+    }
+  })
+  const body = {
+    image_url: 'https://uploads.example.com/character.png',
+    video_url: 'https://uploads.example.com/motion.mp4',
+    character_orientation: 'video',
+    keep_original_sound: 'yes'
+  }
+
+  it('streams an MP4 to provider storage with the video content type', async () => {
+    const mp4 = new Uint8Array(4096).fill(7)
+    const mf = await runtime(async (request) => {
+      if (request.url.endsWith('/files/generate-upload-url')) {
+        expect(await request.json()).toEqual({ content_type: 'video/mp4' })
+        return Response.json({
+          public_url: 'https://uploads.example.com/motion.mp4',
+          upload_url: 'https://uploads.example.com/put',
+          content_type: 'video/mp4',
+          upload_headers: { 'Content-Type': 'video/mp4' }
+        })
+      }
+      expect(request.method).toBe('PUT')
+      expect(request.headers.get('authorization')).toBeNull()
+      expect(request.headers.get('content-type')).toBe('video/mp4')
+      expect(request.headers.get('content-length')).toBe(String(mp4.length))
+      expect(new Uint8Array(await request.arrayBuffer())).toEqual(mp4)
+      return new Response(null, { status: 200 })
+    })
+    const response = await mf.dispatchFetch('https://test/higgsfield/upload', {
+      method: 'POST',
+      headers: {
+        'content-type': 'video/mp4',
+        'content-length': String(mp4.length)
+      },
+      body: mp4
+    })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      url: 'https://uploads.example.com/motion.mp4'
+    })
+  })
+
+  it.for([
+    ['video/webm', '4', '4'],
+    ['video/quicktime', '4', '4'],
+    ['video/mp4', String(100 * 1024 * 1024 + 1), '4'],
+    ['video/mp4', '', '4']
+  ])(
+    'refuses a %s upload declared as %j bytes without asking the provider',
+    async ([type, declared, length]) => {
+      let calls = 0
+      const mf = await runtime(async () => {
+        calls++
+        return new Response(null, { status: 500 })
+      })
+      const response = await mf.dispatchFetch(
+        'https://test/test/declared-upload',
+        {
+          method: 'POST',
+          headers: {
+            'content-type': type,
+            'content-length': length,
+            'x-declared-length': declared
+          },
+          body: 'clip'
+        }
+      )
+      expect(response.status).toBe(400)
+      expect(calls).toBe(0)
+    }
+  )
+
+  it('fails an MP4 upload whose body is shorter than its declared length', async () => {
+    const mf = await runtime(async (request) => {
+      if (request.url.endsWith('/files/generate-upload-url'))
+        return Response.json({
+          public_url: 'https://uploads.example.com/motion.mp4',
+          upload_url: 'https://uploads.example.com/put',
+          content_type: 'video/mp4',
+          upload_headers: { 'Content-Type': 'video/mp4' }
+        })
+      await request.arrayBuffer()
+      return new Response(null, { status: 200 })
+    })
+    const response = await mf.dispatchFetch(
+      'https://test/test/declared-upload',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'video/mp4', 'x-declared-length': '64' },
+        body: 'clip'
+      }
+    )
+    expect(response.status).toBe(400)
+  })
+
+  it('estimates and submits to the endpoint chosen by mode, without sending mode', async () => {
+    const sent: { path: string; body: unknown }[] = []
+    const mf = await runtime(async (request) => {
+      const path = new URL(request.url).pathname
+      if (request.method === 'POST') {
+        sent.push({ path, body: await request.json() })
+        return path.startsWith('/estimate/')
+          ? Response.json({ type: 'estimate', usd: '1.2', credits: '19' })
+          : Response.json({ request_id: requestId, status: 'queued' })
+      }
+      return Response.json({ request_id: requestId, status: 'queued' })
+    })
+    const estimate = await mf.dispatchFetch(
+      'https://test/higgsfield/estimate',
+      { method: 'POST', body: JSON.stringify({ prompt: motion('pro') }) }
+    )
+    expect(estimate.status).toBe(200)
+    await queue(mf, motion('std'))
+    await tick(mf)
+    expect(sent).toEqual([
+      { path: '/estimate/kling-video/v3/motion-control/pro', body },
+      { path: '/kling-video/v3/motion-control/std', body }
+    ])
+  })
+
+  it('refuses an unknown mode before any provider call', async () => {
+    let calls = 0
+    const mf = await runtime(async () => {
+      calls++
+      return Response.json({})
+    })
+    const response = await mf.dispatchFetch('https://test/prompt', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: motion('4k') })
+    })
+    expect(response.status).toBeGreaterThanOrEqual(400)
+    expect(calls).toBe(0)
+  })
 })

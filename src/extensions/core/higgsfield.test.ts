@@ -55,10 +55,17 @@ describe('Higgsfield native node controls', () => {
 
   it('offers the reference library only for provider image inputs', () => {
     const node = new ReferenceNode('Reference')
-    for (const name of ['image_url', 'end_image_url', 'video_url'])
+    for (const name of [
+      'image_url',
+      'end_image_url',
+      'reference_image_url',
+      'video_url'
+    ])
       node.addWidget('text', name, '', () => {})
     extension.nodeCreated?.(node, app)
     expect(buttons(node)).toEqual([
+      'referenceLibrary.title',
+      'higgsfield.upload',
       'referenceLibrary.title',
       'higgsfield.upload',
       'referenceLibrary.title',
@@ -67,6 +74,30 @@ describe('Higgsfield native node controls', () => {
       'higgsfield.estimate'
     ])
   })
+
+  it.for([
+    [ReferenceNode, 'video/mp4'],
+    [ProductionNode, 'video/mp4,video/webm']
+  ] as const)(
+    'offers only the video types each backend accepts (%o → %s)',
+    ([Node, accept]) => {
+      const node = new Node('Video')
+      node.addWidget('text', 'video_url', '', () => {})
+      extension.nodeCreated?.(node, app)
+      const picker = document.createElement('input')
+      vi.spyOn(picker, 'click').mockImplementation(() => {})
+      const create = document.createElement.bind(document)
+      vi.spyOn(document, 'createElement').mockImplementation((tag: string) =>
+        tag === 'input' ? picker : create(tag)
+      )
+      const upload = node.widgets?.find(
+        (widget) => widget.name === 'higgsfield.upload'
+      )
+      upload?.callback?.(upload.value, app.canvas, node, [0, 0])
+      expect(picker.type).toBe('file')
+      expect(picker.accept).toBe(accept)
+    }
+  )
 
   it('gives production nodes upload controls without the reference library or estimate', () => {
     const node = new ProductionNode('Production')

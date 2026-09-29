@@ -24,45 +24,74 @@ const imageTypes = [
   'image/gif'
 ]
 
-export async function uploadImage(request: Request, env: Env) {
+const uploadLimits: Record<string, number> = {
+  ...Object.fromEntries(imageTypes.map((type) => [type, 20 * 1024 * 1024])),
+  // Kling motion control compresses larger videos; we don't relay more.
+  'video/mp4': 100 * 1024 * 1024
+}
+
+/** Relays one image or MP4 to Higgsfield's presigned storage. Video is
+ * streamed at its declared length rather than buffered in Worker memory. */
+export async function uploadMedia(request: Request, env: Env) {
   const contentType = request.headers.get('content-type') ?? ''
-  if (!imageTypes.includes(contentType))
-    throw new Error('Choose a JPEG, PNG, WebP or GIF image.')
-  const reader = request.body?.getReader()
-  if (!reader) throw new Error('Image required.')
-  const chunks: Uint8Array[] = []
-  let size = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    size += value.length
-    if (size > 20 * 1024 * 1024) {
-      await reader.cancel()
-      throw new Error('Images must be no larger than 20 MB.')
+  if (!Object.hasOwn(uploadLimits, contentType))
+    throw new Error('Choose a JPEG, PNG, WebP or GIF image, or an MP4 video.')
+  const limit = uploadLimits[contentType]
+  const video = contentType === 'video/mp4'
+  let body: BodyInit | undefined
+  const declared = Number(request.headers.get('content-length'))
+  if (video) {
+    if (
+      !Number.isSafeInteger(declared) ||
+      declared <= 0 ||
+      declared > limit ||
+      !request.body
+    )
+      throw new Error('Videos must be between 1 byte and 100 MB.')
+  } else {
+    const reader = request.body?.getReader()
+    if (!reader) throw new Error('Image required.')
+    const chunks: Uint8Array[] = []
+    let size = 0
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      size += value.length
+      if (size > limit) {
+        await reader.cancel()
+        throw new Error('Images must be no larger than 20 MB.')
+      }
+      chunks.push(value)
     }
-    chunks.push(value)
-  }
-  if (!size) throw new Error('Image is empty.')
-  const bytes = new Uint8Array(size)
-  let offset = 0
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset)
-    offset += chunk.length
+    if (!size) throw new Error('Image is empty.')
+    const bytes = new Uint8Array(size)
+    let offset = 0
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset)
+      offset += chunk.length
+    }
+    body = bytes
   }
   const upload = uploadSchema.parse(
     await provider(env, 'files/generate-upload-url', {
       content_type: contentType
     })
   )
+  if (video && request.body) {
+    const bounded = new FixedLengthStream(declared)
+    // FixedLengthStream errors if the body is shorter or longer than declared.
+    request.body.pipeTo(bounded.writable).catch(() => {})
+    body = bounded.readable
+  }
   const response = await fetch(upload.upload_url, {
     method: 'PUT',
     headers: upload.upload_headers,
-    body: bytes,
+    body,
     redirect: 'manual',
-    signal: AbortSignal.timeout(60000)
+    signal: AbortSignal.timeout(video ? 300000 : 60000)
   })
   await response.body?.cancel()
-  if (!response.ok) throw new Error('Image upload failed. Try again.')
+  if (!response.ok) throw new Error('Upload failed. Try again.')
   return Response.json(
     { url: upload.public_url },
     { headers: { 'cache-control': 'no-store' } }

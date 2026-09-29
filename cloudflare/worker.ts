@@ -8,7 +8,7 @@ import { reviewRoute } from './reviewer'
 import { routeShot, expandShot } from './planner'
 import { models, nodeDefinitions } from './graph'
 import { boundedJson, json } from './jobs'
-import { uploadImage } from './media'
+import { uploadMedia } from './media'
 import { uploadProductionMedia } from './rendering'
 import { userData } from './userData'
 
@@ -56,7 +56,7 @@ export default {
       const relative = url.pathname.slice(base.length)
       const path = relative.replace(/^\/api(?=\/|$)/, '')
       if (path === '/higgsfield/upload' && request.method === 'POST')
-        return uploadImage(request, env)
+        return uploadMedia(request, env)
       if (path === '/production/upload' && request.method === 'POST')
         return uploadProductionMedia(request, env)
       if (path === '/production/plan' && request.method === 'POST') {

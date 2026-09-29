@@ -20,7 +20,11 @@ const propertySchema = z.object({
   format: z.string().optional(),
   maxLength: z.number().optional(),
   providerField: z.string().optional(),
-  asArray: z.boolean().optional()
+  asArray: z.boolean().optional(),
+  // A choice that means "leave it to the provider": never sent.
+  omitValue: z.string().optional(),
+  // Selects the `{key}` segment of the endpoint instead of being sent.
+  endpointParam: z.boolean().optional()
 })
 const modelSchema = z.object({
   title: z.string(),
@@ -47,6 +51,9 @@ const graphSchema = z.record(
   })
 )
 export type Graph = z.infer<typeof graphSchema>
+// Linkable inputs. Image inputs also take approved `mhoo-asset:` tokens.
+const imageInputs = ['image_url', 'end_image_url', 'reference_image_url']
+const linkableInputs = ['prompt', ...imageInputs, 'video_url']
 export type Input = Record<string, string | number | boolean | string[]>
 export type Media = {
   url: string
@@ -145,21 +152,21 @@ export function planGraph(value: unknown): { graph: Graph; order: string[] } {
       if (Array.isArray(value)) {
         if (value[1] !== 0)
           throw new Error('Only the URL output (slot 0) can be connected.')
-        if (
-          ![
-            'prompt',
-            'image_url',
-            'end_image_url',
-            'reference_image_url'
-          ].includes(key)
-        )
-          throw new Error('Connect URLs only to text or image URL inputs.')
+        if (!linkableInputs.includes(key))
+          throw new Error(
+            'Connect URLs only to text, image or video URL inputs.'
+          )
         visit(value[0])
         if (
           key.endsWith('image_url') &&
           models[graph[value[0]].class_type]?.kind !== 'image'
         )
           throw new Error('Image input requires an image output.')
+        if (
+          key === 'video_url' &&
+          models[graph[value[0]].class_type]?.kind !== 'video'
+        )
+          throw new Error('Video input requires a video output.')
       }
     }
     resolveInputs(
@@ -195,6 +202,25 @@ export function planGraph(value: unknown): { graph: Graph; order: string[] } {
   return { graph, order }
 }
 
+/** The provider path for a node; `{key}` segments come from enum inputs
+ * marked `endpointParam`, validated like any other input. */
+export function endpointFor(node: Graph[string]): string {
+  if (!Object.hasOwn(models, node.class_type))
+    throw new Error('Unsupported node')
+  const model = models[node.class_type]
+  return model.endpoint.replace(/\{(\w+)\}/g, (_, key: string) => {
+    const prop = Object.hasOwn(model.schema.properties, key)
+      ? model.schema.properties[key]
+      : undefined
+    const value = Object.hasOwn(node.inputs, key)
+      ? node.inputs[key]
+      : prop?.default
+    if (!prop?.endpointParam || !prop.enum?.includes(value as string))
+      throw new Error(`Unsupported ${key}.`)
+    return String(value)
+  })
+}
+
 export function resolveInputs(
   node: Graph[string],
   outputs: Record<string, Media[]>
@@ -208,7 +234,7 @@ export function resolveInputs(
       ? node.inputs[key]
       : prop.default
     const value = Array.isArray(raw) ? outputs[raw[0]]?.[0]?.url : raw
-    if (value === undefined || value === '') {
+    if (value === undefined || value === '' || value === prop.omitValue) {
       if (model.schema.required.includes(key))
         throw new Error(`${model.title}: ${key} is required.`)
       continue
@@ -247,10 +273,7 @@ export function resolveInputs(
       throw new Error('Private references are only supported in image inputs.')
     if (
       key.endsWith('_url') &&
-      !(
-        ['image_url', 'end_image_url', 'reference_image_url'].includes(key) &&
-        referenceToken.test(String(value))
-      )
+      !(imageInputs.includes(key) && referenceToken.test(String(value)))
     ) {
       const url = new URL(String(value))
       if (
@@ -262,6 +285,7 @@ export function resolveInputs(
       )
         throw new Error('Media inputs must use public HTTPS URLs.')
     }
+    if (prop.endpointParam) continue
     const field = prop.providerField ?? key
     if (prop.asArray) {
       const previous = input[field]

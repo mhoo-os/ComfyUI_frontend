@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { isFinishing, resolveFinishing, renderPlanSchema } from './finishing'
 import type { EditValue } from './finishing'
 import { renderVideo } from './rendering'
-import { models, planGraph, resolveInputs } from './graph'
+import { endpointFor, models, planGraph, resolveInputs } from './graph'
 import type { Graph, Media } from './graph'
 import { archiveMedia, readMedia } from './media'
 import { talkingShotSchema } from './talkingShot'
@@ -389,7 +389,7 @@ export class ComfyJobs extends DurableObject<Env> {
         return json(
           await provider(
             this.env,
-            `estimate/${models[node.class_type].endpoint}`,
+            `estimate/${endpointFor(node)}`,
             await new ReferenceLibrary(this.ctx.storage, this.env).resolve(
               resolveInputs(node, {}),
               true,
@@ -859,9 +859,7 @@ export class ComfyJobs extends DurableObject<Env> {
         this.ctx.storage,
         this.env
       ).submit(resolveInputs(node, job.outputs), maxLength, async (input) =>
-        resultSchema.parse(
-          await provider(this.env, models[node.class_type].endpoint, input)
-        )
+        resultSchema.parse(await provider(this.env, endpointFor(node), input))
       )
       job.running[nodeId] = { requestId: result.request_id }
       job.providerRequests = {

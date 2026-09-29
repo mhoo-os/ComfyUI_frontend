@@ -11,7 +11,7 @@ import { DurableObject } from 'cloudflare:workers'
 import { z } from 'zod'
 import { uploadProductionMedia } from '../rendering'
 import { ComfyJobs } from '../jobs'
-import { uploadImage } from '../media'
+import { uploadMedia } from '../media'
 import { userData } from '../userData'
 
 export class TestJobs extends ComfyJobs {
@@ -57,10 +57,19 @@ export default {
         env
       ).catch(() => Response.json({ error: 'Invalid length' }, { status: 400 }))
     }
+    if (url.pathname === '/test/declared-upload') {
+      const headers = new Headers(request.headers)
+      headers.set('content-length', headers.get('x-declared-length') ?? '')
+      return uploadMedia(new Request(request, { headers }), {
+        ...env,
+        HF_CREDENTIALS: { get: async () => 'test-only' },
+        PLANNER_GATEWAY_AUTH: { get: async () => 'gateway-test-only' }
+      }).catch(() => Response.json({ error: 'Refused' }, { status: 400 }))
+    }
     if (url.pathname === '/production/upload')
       return uploadProductionMedia(request, env)
     if (url.pathname === '/higgsfield/upload')
-      return uploadImage(request, {
+      return uploadMedia(request, {
         ...env,
         HF_CREDENTIALS: { get: async () => 'test-only' },
         PLANNER_GATEWAY_AUTH: { get: async () => 'gateway-test-only' }
