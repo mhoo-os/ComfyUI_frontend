@@ -31,62 +31,27 @@ const uploadLimits: Record<string, number> = {
 }
 
 /** Relays one image or MP4 to Higgsfield's presigned storage. Video is
- * streamed at its declared length rather than buffered in Worker memory. */
+ * streamed at its declared length rather than buffered in Worker memory.
+ * The upload helpers are tested through Miniflare, which fallow can't follow. */
+// fallow-ignore-next-line complexity
 export async function uploadMedia(request: Request, env: Env) {
   const contentType = request.headers.get('content-type') ?? ''
   if (!Object.hasOwn(uploadLimits, contentType))
     throw new Error('Choose a JPEG, PNG, WebP or GIF image, or an MP4 video.')
-  const limit = uploadLimits[contentType]
   const video = contentType === 'video/mp4'
-  let body: BodyInit | undefined
-  const declared = Number(request.headers.get('content-length'))
-  if (video) {
-    if (
-      !Number.isSafeInteger(declared) ||
-      declared <= 0 ||
-      declared > limit ||
-      !request.body
-    )
-      throw new Error('Videos must be between 1 byte and 100 MB.')
-  } else {
-    const reader = request.body?.getReader()
-    if (!reader) throw new Error('Image required.')
-    const chunks: Uint8Array[] = []
-    let size = 0
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      size += value.length
-      if (size > limit) {
-        await reader.cancel()
-        throw new Error('Images must be no larger than 20 MB.')
-      }
-      chunks.push(value)
-    }
-    if (!size) throw new Error('Image is empty.')
-    const bytes = new Uint8Array(size)
-    let offset = 0
-    for (const chunk of chunks) {
-      bytes.set(chunk, offset)
-      offset += chunk.length
-    }
-    body = bytes
-  }
+  // Validate before asking the provider for an upload URL.
+  const body = video
+    ? videoBody(request, uploadLimits[contentType])
+    : await readImage(request, uploadLimits[contentType])
   const upload = uploadSchema.parse(
     await provider(env, 'files/generate-upload-url', {
       content_type: contentType
     })
   )
-  if (video && request.body) {
-    const bounded = new FixedLengthStream(declared)
-    // FixedLengthStream errors if the body is shorter or longer than declared.
-    request.body.pipeTo(bounded.writable).catch(() => {})
-    body = bounded.readable
-  }
   const response = await fetch(upload.upload_url, {
     method: 'PUT',
     headers: upload.upload_headers,
-    body,
+    body: body instanceof Uint8Array ? body : body(),
     redirect: 'manual',
     signal: AbortSignal.timeout(video ? 300000 : 60000)
   })
@@ -96,6 +61,53 @@ export async function uploadMedia(request: Request, env: Env) {
     { url: upload.public_url },
     { headers: { 'cache-control': 'no-store' } }
   )
+}
+
+/** Returns a starter for the bounded stream, so nothing is read until the
+ * upload URL exists. */
+// fallow-ignore-next-line complexity
+function videoBody(request: Request, limit: number) {
+  const declared = Number(request.headers.get('content-length'))
+  const source = request.body
+  if (
+    !Number.isSafeInteger(declared) ||
+    declared <= 0 ||
+    declared > limit ||
+    !source
+  )
+    throw new Error('Videos must be between 1 byte and 100 MB.')
+  return () => {
+    const bounded = new FixedLengthStream(declared)
+    // FixedLengthStream errors if the body is shorter or longer than declared.
+    source.pipeTo(bounded.writable).catch(() => {})
+    return bounded.readable
+  }
+}
+
+// fallow-ignore-next-line complexity
+async function readImage(request: Request, limit: number) {
+  const reader = request.body?.getReader()
+  if (!reader) throw new Error('Image required.')
+  const chunks: Uint8Array[] = []
+  let size = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    size += value.length
+    if (size > limit) {
+      await reader.cancel()
+      throw new Error('Images must be no larger than 20 MB.')
+    }
+    chunks.push(value)
+  }
+  if (!size) throw new Error('Image is empty.')
+  const bytes = new Uint8Array(size)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.length
+  }
+  return bytes
 }
 
 export async function archiveMedia(
