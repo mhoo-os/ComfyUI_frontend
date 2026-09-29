@@ -759,6 +759,115 @@ describe('Reference pipeline and storage', () => {
 })
 
 describe('Production finishing', () => {
+  it('archives a Kling clip and renders it through the finishing chain', async () => {
+    const requests: string[] = []
+    const mf = await runtime(
+      async (request) => {
+        const url = new URL(request.url)
+        requests.push(url.pathname)
+        if (url.hostname === 'renderer.example.com') {
+          const form = await request.formData()
+          expect(JSON.parse(String(form.get('manifest')))).toMatchObject({
+            clips: [{ start: 0, duration: 3 }]
+          })
+          const media = form.get('clip0')
+          expect(
+            typeof media === 'object' && media !== null && (await media.text())
+          ).toBe('video-bytes')
+          return new Response('finished-mp4', {
+            headers: { 'content-type': 'video/mp4', 'content-length': '12' }
+          })
+        }
+        if (request.method === 'POST')
+          return Response.json({ request_id: requestId, status: 'queued' })
+        return Response.json({
+          request_id: requestId,
+          status: 'completed',
+          video: { url: 'https://cdn.example.com/clip.mp4' }
+        })
+      },
+      async () =>
+        new Response('video-bytes', {
+          headers: { 'content-type': 'video/mp4', 'content-length': '11' }
+        })
+    )
+    await queue(mf, {
+      source: {
+        class_type: 'HiggsfieldKling3Pro',
+        inputs: {
+          prompt: 'A visitor arrives.',
+          image_url: 'https://cdn.example.com/start.png'
+        }
+      },
+      clip: {
+        class_type: 'MhooClip',
+        inputs: { video_url: ['source', 0], duration: 3 }
+      },
+      sequence: { class_type: 'MhooSequence', inputs: { clip_1: ['clip', 0] } },
+      compose: {
+        class_type: 'MhooCompose',
+        inputs: { sequence: ['sequence', 0] }
+      },
+      export: { class_type: 'MhooExport', inputs: { edit: ['compose', 0] } }
+    })
+    await tick(mf)
+    await tick(mf)
+    await tick(mf)
+    await tick(mf)
+    await tick(mf)
+    expect(await jobs(mf)).toMatchObject({
+      jobs: [{ status: 'completed', outputs_count: 2 }]
+    })
+    expect(
+      requests.filter((path) => path === '/kling-video/v3.0/pro/image-to-video')
+    ).toHaveLength(1)
+    expect(requests).toContain('/render')
+  })
+
+  it('uses the same complete custom-shot request for estimates and generation', async () => {
+    const sent: { path: string; body: unknown }[] = []
+    const mf = await runtime(async (request) => {
+      const path = new URL(request.url).pathname
+      sent.push({ path, body: await request.json() })
+      return path.startsWith('/estimate/')
+        ? Response.json({ type: 'estimate', usd: '1', credits: '10' })
+        : Response.json({ request_id: requestId, status: 'queued' })
+    })
+    const prompt = {
+      shot: {
+        class_type: 'HiggsfieldKling3Pro',
+        inputs: {
+          prompt: 'A visitor arrives.',
+          image_url: 'https://cdn.example.com/start.png',
+          multi_shots: true,
+          multi_prompt: JSON.stringify([
+            { prompt: 'Wide shot.', duration: 4 },
+            { prompt: 'At the door.', duration: 3 }
+          ])
+        }
+      }
+    }
+    const estimate = await mf.dispatchFetch(
+      'https://test/higgsfield/estimate',
+      { method: 'POST', body: JSON.stringify({ prompt }) }
+    )
+    expect(estimate.status).toBe(200)
+    await queue(mf, prompt)
+    await tick(mf)
+    expect(sent.map(({ path }) => path)).toEqual([
+      '/estimate/kling-video/v3.0/pro/image-to-video',
+      '/kling-video/v3.0/pro/image-to-video'
+    ])
+    expect(sent[0].body).toEqual(sent[1].body)
+    expect(sent[1].body).toMatchObject({
+      multi_shots: true,
+      multi_prompt: [
+        { prompt: 'Wide shot.', duration: 4 },
+        { prompt: 'At the door.', duration: 3 }
+      ]
+    })
+    expect(sent[1].body).not.toHaveProperty('duration')
+  })
   it('rejects a production upload whose declared length is smaller than its body', async () => {
     const mf = await runtime(async () => {
       throw new Error('No provider call expected')
@@ -1203,7 +1312,8 @@ describe('Private character reference review', () => {
           last_image_url: 'https://example.com/approved-reference.jpg',
           duration: 5,
           cfg_scale: 0.5,
-          sound: 'off'
+          sound: 'off',
+          multi_shots: false
         }
       }
     ])
@@ -1251,6 +1361,48 @@ describe('Private character reference review', () => {
         }
       }
     ])
+  })
+  it('keeps approval checks and no-upload estimates for reference lists', async () => {
+    const sent: unknown[] = []
+    const mf = await runtime(async (request) => {
+      expect(new URL(request.url).pathname).toBe(
+        '/estimate/bytedance/seedance-2.5/reference-to-video'
+      )
+      sent.push(await request.json())
+      return Response.json({ type: 'estimate', usd: '1', credits: '10' })
+    })
+    const asset = await describeAsset(mf, await upload(mf))
+    const prompt = {
+      shot: {
+        class_type: 'HiggsfieldSeedanceReference',
+        inputs: {
+          prompt: 'Use reference.',
+          image_urls: `mhoo-asset:${asset.id}:${asset.revision}\nhttps://cdn.example.com/context.png`,
+          audio_urls: 'https://cdn.example.com/voice.wav'
+        }
+      }
+    }
+    const estimate = () =>
+      mf.dispatchFetch('https://test/higgsfield/estimate', {
+        method: 'POST',
+        body: JSON.stringify({ prompt })
+      })
+    expect((await estimate()).status).toBe(400)
+    expect(sent).toEqual([])
+    await review(mf, asset)
+    expect((await estimate()).status).toBe(200)
+    expect(sent).toEqual([
+      expect.objectContaining({
+        image_urls: [
+          'https://example.com/approved-reference.jpg',
+          'https://cdn.example.com/context.png'
+        ],
+        audio_urls: ['https://cdn.example.com/voice.wav']
+      })
+    ])
+    await review(mf, asset, 'draft')
+    expect((await estimate()).status).toBe(400)
+    expect(sent).toHaveLength(1)
   })
   it('resolves approved bytes only at execution and never sends a private token to generation', async () => {
     const paths: string[] = []

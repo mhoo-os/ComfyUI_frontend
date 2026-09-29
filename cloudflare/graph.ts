@@ -2,6 +2,12 @@ import { referenceToken } from './referenceContract'
 import { z } from 'zod'
 
 import type { EditValue } from './finishing'
+import type { KlingShot } from './extendedInputs'
+import {
+  parseKlingShots,
+  parseMediaUrls,
+  validateMediaUrl
+} from './extendedInputs'
 import catalog from './models.json'
 import { compileTalkingShot } from './talkingShot'
 import {
@@ -19,6 +25,8 @@ const propertySchema = z.object({
   maximum: z.number().optional(),
   format: z.string().optional(),
   maxLength: z.number().optional(),
+  maxItems: z.number().int().positive().optional(),
+  tooltip: z.string().optional(),
   providerField: z.string().optional(),
   asArray: z.boolean().optional(),
   // A choice that means "leave it to the provider": never sent.
@@ -56,7 +64,10 @@ export type Graph = z.infer<typeof graphSchema>
 // Linkable inputs. Image inputs also take approved `mhoo-asset:` tokens.
 const imageInputs = ['image_url', 'end_image_url', 'reference_image_url']
 const linkableInputs = ['prompt', ...imageInputs, 'video_url']
-export type Input = Record<string, string | number | boolean | string[]>
+export type Input = Record<
+  string,
+  string | number | boolean | string[] | KlingShot[]
+>
 export type Media = {
   url: string
   kind: 'image' | 'video'
@@ -87,9 +98,15 @@ export function nodeDefinitions() {
                   default: prop.default ?? (key === 'seed' ? 1 : ''),
                   ...(prop.minimum !== undefined && { min: prop.minimum }),
                   ...(prop.maximum !== undefined && { max: prop.maximum }),
-                  ...(['prompt', 'scene', 'dialogue'].includes(key) && {
-                    multiline: true
-                  }),
+                  tooltip: prop.tooltip,
+                  multiline: [
+                    'prompt',
+                    'scene',
+                    'dialogue',
+                    'uri-list',
+                    'kling-shots',
+                    'kling-elements'
+                  ].includes(prop.format ?? key),
                   ...(key === 'seed' && { control_after_generate: true })
                 }
               ]
@@ -135,7 +152,7 @@ export function planGraph(value: unknown): { graph: Graph; order: string[] } {
     const node = graph[id]
     if (isFinishing(node.class_type)) {
       visiting.add(id)
-      validateFinishing(node, graph)
+      validateFinishing(node, graph, models)
       for (const value of Object.values(node.inputs))
         if (Array.isArray(value)) visit(value[0])
       visiting.delete(id)
@@ -262,6 +279,41 @@ export function resolveInputs(
       throw new Error(`Unsupported ${key}.`)
     if (typeof value === 'string' && value.length > (prop.maxLength ?? 8000))
       throw new Error(`${key} is too long.`)
+    if (prop.format === 'uri-list') {
+      const urls = parseMediaUrls(z.string().parse(value), key === 'image_urls')
+      if (!urls.length) continue
+      const field = prop.providerField ?? key
+      input[field] = [
+        ...(Object.hasOwn(input, field)
+          ? z.array(z.string()).parse(input[field])
+          : []),
+        ...urls
+      ]
+      set.add(key)
+      continue
+    }
+    if (prop.format === 'kling-elements') {
+      const elements = z
+        .string()
+        .parse(value)
+        .split(/\r?\n/)
+        .map((id) => id.trim())
+        .filter(Boolean)
+      if (elements.length)
+        input[key] = z
+          .array(
+            z
+              .string()
+              .regex(/^\d+$/, 'Kling element IDs must be decimal strings.')
+          )
+          .parse(elements)
+      continue
+    }
+    if (prop.format === 'kling-shots') {
+      const shots = parseKlingShots(z.string().parse(value))
+      if (shots.length) input[key] = shots
+      continue
+    }
     if (
       prop.format === 'uuid' &&
       typeof value === 'string' &&
@@ -277,31 +329,16 @@ export function resolveInputs(
       )
     )
       throw new Error('Private references are only supported in image inputs.')
-    if (
-      key.endsWith('_url') &&
-      !(imageInputs.includes(key) && referenceToken.test(String(value)))
-    ) {
-      const url = new URL(String(value))
-      const host = url.hostname.replace(/\.$/, '')
-      if (
-        url.protocol !== 'https:' ||
-        url.username ||
-        url.password ||
-        host === 'localhost' ||
-        host.endsWith('.localhost') ||
-        // IP literals: dotted IPv4 (the URL parser normalizes other forms) and any bracketed IPv6.
-        /^[\d.]+$/.test(host) ||
-        host.startsWith('[')
-      )
-        throw new Error('Media inputs must use public HTTPS URLs.')
-    }
+    if (key.endsWith('_url'))
+      validateMediaUrl(String(value), imageInputs.includes(key))
     set.add(key)
     if (prop.endpointParam) continue
     const field = prop.providerField ?? key
     if (prop.asArray) {
-      const previous = input[field]
       input[field] = [
-        ...(Array.isArray(previous) ? previous : []),
+        ...(Object.hasOwn(input, field)
+          ? z.array(z.string()).parse(input[field])
+          : []),
         String(value)
       ]
     } else input[field] = value
@@ -309,6 +346,22 @@ export function resolveInputs(
   const any = model.schema.requiredAny
   if (any && !any.some((key) => set.has(key)))
     throw new Error(`${model.title}: set one of ${any.join(', ')}.`)
+  for (const [key, prop] of Object.entries(model.schema.properties)) {
+    const value = input[prop.providerField ?? key]
+    if (
+      prop.maxItems !== undefined &&
+      Array.isArray(value) &&
+      value.length > prop.maxItems
+    )
+      throw new Error(
+        `${key} accepts at most ${prop.maxItems} references, including single inputs.`
+      )
+  }
+  if (input.multi_prompt) {
+    if (input.multi_shots !== true)
+      throw new Error('Enable multi_shots to use custom shots.')
+    delete input.duration
+  }
   if (node.class_type === 'HiggsfieldSoul' && input.custom_reference_id)
     z.number().positive().max(1).parse(input.custom_reference_strength)
   return node.class_type === 'HiggsfieldTalkingShot'

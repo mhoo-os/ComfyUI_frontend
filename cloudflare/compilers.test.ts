@@ -78,7 +78,8 @@ describe('Kling 3.0 Standard compiler', () => {
       image_url: start,
       duration: 5,
       cfg_scale: 0.5,
-      sound: 'off'
+      sound: 'off',
+      multi_shots: false
     })
     expect(String(compiled.inputs.prompt)).not.toContain('PSSHH')
     expect(String(compiled.inputs.prompt)).not.toContain(

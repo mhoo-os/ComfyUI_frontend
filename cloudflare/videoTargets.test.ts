@@ -80,7 +80,8 @@ describe('Video input and motion target submission boundary', () => {
         last_image_url: end,
         duration: 12,
         cfg_scale: 0.5,
-        sound: 'off'
+        sound: 'off',
+        multi_shots: false
       }
     },
     {
@@ -295,8 +296,8 @@ describe('Video input and motion target submission boundary', () => {
     ],
     [
       'HiggsfieldKling3Pro',
-      { prompt: 'x', image_url: still, multi_prompt: '[]' },
-      'Unsupported input'
+      { prompt: 'x', image_url: still, multi_prompt: 'not-json' },
+      'valid JSON'
     ],
     [
       'HiggsfieldKlingO3FirstLast',

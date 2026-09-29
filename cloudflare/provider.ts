@@ -59,10 +59,9 @@ export async function provider(
       if (secret) message = message.split(secret).join('[redacted]')
     }
     if (input) {
-      for (const value of Object.values(input)) {
-        if (typeof value === 'string' && value.length > 3)
+      for (const value of inputStrings(input))
+        if (value.length > 3)
           message = message.split(value).join('[input redacted]')
-      }
     }
     return message
       .replace(/https?:\/\/[^\s<>"']+/gi, '[URL redacted]')
@@ -103,6 +102,14 @@ export async function provider(
     return result
   }
   return body
+}
+
+function inputStrings(value: unknown): string[] {
+  if (typeof value === 'string') return [value]
+  if (Array.isArray(value)) return value.flatMap(inputStrings)
+  if (value && typeof value === 'object')
+    return Object.values(value).flatMap(inputStrings)
+  return []
 }
 
 export function resultMedia(result: ProviderResult): Media[] {

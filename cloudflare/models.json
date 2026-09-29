@@ -211,13 +211,21 @@
           "format": "uri",
           "providerField": "image_urls",
           "asArray": true
+        },
+        "image_urls": {
+          "type": "string",
+          "format": "uri-list",
+          "default": "",
+          "maxItems": 16,
+          "maxLength": 32000,
+          "tooltip": "One public HTTPS image reference or approved mhoo-asset token per line. Maximum 16, including the single reference inputs."
         }
       },
       "required": ["prompt"]
     }
   },
   "HiggsfieldTalkingShot": {
-    "title": "Script \u2192 Talking Shot \u00b7 Preview",
+    "title": "Script → Talking Shot · Preview",
     "endpoint": "bytedance/seedance-2.5/text-to-video",
     "kind": "video",
     "source": "https://docs.higgsfield.ai/docs/models/seedance-2-5/text-to-video.md",
@@ -327,6 +335,23 @@
           "type": "string",
           "enum": ["on", "off"],
           "default": "off"
+        },
+        "multi_shots": {
+          "type": "boolean",
+          "default": false,
+          "tooltip": "Enable multiple shots. Leave custom shots empty for automatic cuts."
+        },
+        "multi_prompt": {
+          "type": "string",
+          "format": "kling-shots",
+          "default": "",
+          "tooltip": "Optional JSON array of 1–6 shots: [{\"prompt\":\"Wide shot\",\"duration\":4}]. Each shot is 1–15 seconds. The sum replaces duration for generation and billing."
+        },
+        "elements": {
+          "type": "string",
+          "format": "kling-elements",
+          "default": "",
+          "tooltip": "One Kling element ID per line. IDs must already belong to your Higgsfield API account."
         }
       },
       "required": ["image_url"]
@@ -444,6 +469,23 @@
           "type": "string",
           "enum": ["on", "off"],
           "default": "off"
+        },
+        "multi_shots": {
+          "type": "boolean",
+          "default": false,
+          "tooltip": "Enable multiple shots. Leave custom shots empty for automatic cuts."
+        },
+        "multi_prompt": {
+          "type": "string",
+          "format": "kling-shots",
+          "default": "",
+          "tooltip": "Optional JSON array of 1–6 shots: [{\"prompt\":\"Wide shot\",\"duration\":4}]. Each shot is 1–15 seconds. The sum replaces duration for generation and billing."
+        },
+        "elements": {
+          "type": "string",
+          "format": "kling-elements",
+          "default": "",
+          "tooltip": "One Kling element ID per line. IDs must already belong to your Higgsfield API account."
         }
       },
       "required": ["prompt", "image_url"]
@@ -709,6 +751,30 @@
         "generate_audio": {
           "type": "boolean",
           "default": false
+        },
+        "image_urls": {
+          "type": "string",
+          "format": "uri-list",
+          "default": "",
+          "maxItems": 30,
+          "maxLength": 60000,
+          "tooltip": "One public HTTPS image reference per line. Maximum 30, including the single reference inputs. Approved mhoo-asset tokens are also accepted."
+        },
+        "video_urls": {
+          "type": "string",
+          "format": "uri-list",
+          "default": "",
+          "maxItems": 10,
+          "maxLength": 60000,
+          "tooltip": "One public HTTPS video reference per line. Maximum 10, including the single reference inputs."
+        },
+        "audio_urls": {
+          "type": "string",
+          "format": "uri-list",
+          "default": "",
+          "maxItems": 10,
+          "maxLength": 60000,
+          "tooltip": "One public HTTPS audio reference per line. Maximum 10, including the single reference inputs."
         }
       },
       "required": ["prompt"]
@@ -767,10 +833,41 @@
         "generate_audio": {
           "type": "boolean",
           "default": false
+        },
+        "image_urls": {
+          "type": "string",
+          "format": "uri-list",
+          "default": "",
+          "maxItems": 30,
+          "maxLength": 60000,
+          "tooltip": "One public HTTPS image reference per line. Maximum 30, including the single reference inputs. Approved mhoo-asset tokens are also accepted."
+        },
+        "video_urls": {
+          "type": "string",
+          "format": "uri-list",
+          "default": "",
+          "maxItems": 10,
+          "maxLength": 60000,
+          "tooltip": "One public HTTPS video reference per line. Maximum 10, including the single reference inputs."
+        },
+        "audio_urls": {
+          "type": "string",
+          "format": "uri-list",
+          "default": "",
+          "maxItems": 10,
+          "maxLength": 60000,
+          "tooltip": "One public HTTPS audio reference per line. Maximum 10, including the single reference inputs."
         }
       },
       "required": [],
-      "requiredAny": ["image_url", "reference_image_url", "video_url"]
+      "requiredAny": [
+        "image_url",
+        "reference_image_url",
+        "video_url",
+        "image_urls",
+        "video_urls",
+        "audio_urls"
+      ]
     }
   }
 }

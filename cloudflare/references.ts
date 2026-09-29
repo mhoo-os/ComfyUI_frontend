@@ -381,7 +381,7 @@ export class ReferenceLibrary {
     const tokens = [
       ...new Set(
         Object.values(input)
-          .flatMap((value) => (Array.isArray(value) ? value : [value]))
+          .flatMap<unknown>((value) => (Array.isArray(value) ? value : [value]))
           .filter(
             (value): value is string =>
               typeof value === 'string' && value.startsWith('mhoo-asset:')

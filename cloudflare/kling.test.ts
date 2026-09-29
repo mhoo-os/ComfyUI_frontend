@@ -68,7 +68,8 @@ describe('Kling 3.0 Standard submission boundary', () => {
       last_image_url: kling3.end_image_url,
       duration: 8,
       cfg_scale: 0.5,
-      sound: 'off'
+      sound: 'off',
+      multi_shots: false
     })
   })
 

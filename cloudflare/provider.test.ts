@@ -103,4 +103,23 @@ describe('Provider diagnostics', () => {
       resultSchema.parse(await provider(env, 'status')).error
     ).toHaveLength(1000)
   })
+
+  it('redacts prompts nested in custom shots from provider errors', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json(
+          {
+            detail: 'Rejected private shot direction'
+          },
+          { status: 422 }
+        )
+      )
+    )
+    await expect(
+      provider(env, 'model', {
+        multi_prompt: [{ prompt: 'private shot direction', duration: 4 }]
+      })
+    ).rejects.toThrow('Rejected [input redacted]')
+  })
 })

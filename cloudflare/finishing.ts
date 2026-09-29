@@ -120,7 +120,11 @@ export type EditValue =
   | z.infer<typeof clip>
   | z.infer<typeof sequence>
   | z.infer<typeof edit>
-export function validateFinishing(node: Graph[string], graph: Graph) {
+export function validateFinishing(
+  node: Graph[string],
+  graph: Graph,
+  models: Record<string, { kind: 'image' | 'video' }>
+) {
   if (!isFinishing(node.class_type))
     throw new Error('Unsupported finishing node.')
   const def = finishingDefinitions[node.class_type]
@@ -143,8 +147,10 @@ export function validateFinishing(node: Graph[string], graph: Graph) {
         throw new Error(`Invalid connection to ${key}.`)
       if (
         key === 'video_url' &&
-        !['HiggsfieldVideo', 'HiggsfieldAnimate', 'MhooExport'].includes(
-          source.class_type
+        source.class_type !== 'MhooExport' &&
+        !(
+          Object.hasOwn(models, source.class_type) &&
+          models[source.class_type].kind === 'video'
         )
       )
         throw new Error('Clip requires a video output.')
