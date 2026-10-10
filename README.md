@@ -1,3 +1,10 @@
+> **MHOO fork: deprecated for new application development.**
+> Use [MHOO Studio](https://mhoo.dev/00/studio/) for Studio work.
+> The legacy canvas remains available while its saved-workflow and finishing
+> functionality is reconciled. This is not a shutdown of upstream ComfyUI or
+> MHOO's shared backend. Read the [retirement boundary](docs/mhoo/RETIREMENT.md)
+> before deploying or archiving this fork.
+
 <div align="center">
 
 # ComfyUI_frontend
